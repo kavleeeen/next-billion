@@ -58,6 +58,7 @@ class HNStory:
     points: int | None = None
     comments: int | None = None
     posted_at: str | None = None
+    author: str | None = None
     raw: dict[str, Any] = field(default_factory=dict, repr=False)
 
     def to_row(self, company_id: int) -> dict[str, Any]:
@@ -69,6 +70,7 @@ class HNStory:
             "points": self.points,
             "comments": self.comments,
             "posted_at": self.posted_at,
+            "author": self.author,
             "raw_json": json.dumps(self.raw, ensure_ascii=False),
         }
 
@@ -106,4 +108,31 @@ class Founder:
             "current_company": self.current_company,
             "prior_roles_json": json.dumps(self.prior_roles, ensure_ascii=False),
             "raw_json": json.dumps(self.raw, ensure_ascii=False),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class HNComment:
+    """One comment in a launch thread. `is_op` marks the submitter's own words."""
+
+    story_id: str
+    comment_id: str
+    text: str
+    author: str | None = None
+    is_op: bool = False
+    posted_at: str | None = None
+
+    @property
+    def permalink(self) -> str:
+        """Citable source for anything quoted from this comment."""
+        return f"https://news.ycombinator.com/item?id={self.comment_id}"
+
+    def to_row(self) -> dict[str, Any]:
+        return {
+            "story_id": self.story_id,
+            "comment_id": self.comment_id,
+            "author": self.author,
+            "text": self.text,
+            "is_op": int(self.is_op),
+            "posted_at": self.posted_at,
         }

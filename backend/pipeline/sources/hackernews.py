@@ -56,6 +56,7 @@ def _to_story(hit: dict[str, Any]) -> HNStory:
         points=hit.get("points"),
         comments=hit.get("num_comments"),
         posted_at=_posted_at(hit.get("created_at_i")),
+        author=hit.get("author"),
         raw=hit,
     )
 

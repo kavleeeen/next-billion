@@ -61,6 +61,8 @@ CREATE TABLE IF NOT EXISTS hn_stories (
     points      INTEGER,
     comments    INTEGER,
     posted_at   TEXT,                      -- ISO date
+    author      TEXT,                      -- HN username of the submitter
+    comments_fetched_at TEXT,              -- NULL until the thread is pulled
     raw_json    TEXT,
     created_at  TEXT    NOT NULL,
     updated_at  TEXT    NOT NULL
@@ -90,3 +92,20 @@ CREATE TABLE IF NOT EXISTS pdl_usage (
 );
 
 CREATE INDEX IF NOT EXISTS idx_pdl_usage_at ON pdl_usage (called_at);
+
+-- Founders answer questions in their own launch thread: where they worked, why
+-- now, who the users are. Every line has a permalink, so a claim taken from one
+-- is citable. `is_op` marks the submitter's own words.
+CREATE TABLE IF NOT EXISTS hn_comments (
+    id          INTEGER PRIMARY KEY,
+    story_id    TEXT    NOT NULL,          -- hn_stories.story_id
+    comment_id  TEXT    NOT NULL UNIQUE,   -- Algolia objectID
+    author      TEXT,
+    text        TEXT    NOT NULL,          -- HTML stripped
+    is_op       INTEGER NOT NULL DEFAULT 0,
+    posted_at   TEXT,
+    created_at  TEXT    NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_hn_comments_story ON hn_comments (story_id);
+CREATE INDEX IF NOT EXISTS idx_hn_comments_op ON hn_comments (story_id, is_op);

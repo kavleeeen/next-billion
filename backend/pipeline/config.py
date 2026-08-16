@@ -42,6 +42,7 @@ class HNSettings:
     min_points: int = 30
     lookback_days: int = 365   # first run only; later runs start from the newest story held
     refresh_days: int = 7      # re-read this far back, so recent points stay current
+    comment_workers: int = 8   # writes stay serial; a SQLite connection is not shareable
 
 
 @dataclass(frozen=True)

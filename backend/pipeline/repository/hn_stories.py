@@ -9,9 +9,9 @@ from ..models import HNStory
 
 UPSERT = """
 INSERT INTO hn_stories (company_id, story_id, title, url, points, comments,
-                        posted_at, raw_json, created_at, updated_at)
+                        posted_at, author, raw_json, created_at, updated_at)
 VALUES (:company_id, :story_id, :title, :url, :points, :comments,
-        :posted_at, :raw_json, :now, :now)
+        :posted_at, :author, :raw_json, :now, :now)
 ON CONFLICT (story_id) DO UPDATE SET
     company_id = excluded.company_id,
     title      = excluded.title,
@@ -19,6 +19,7 @@ ON CONFLICT (story_id) DO UPDATE SET
     points     = excluded.points,
     comments   = excluded.comments,
     posted_at  = excluded.posted_at,
+    author     = excluded.author,
     raw_json   = excluded.raw_json,
     updated_at = excluded.updated_at
 """

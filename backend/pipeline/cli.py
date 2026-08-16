@@ -5,6 +5,7 @@ import argparse
 import logging
 import sys
 
+from .comments import fetch_comments
 from .enrich import enrich
 from .enrich.pdl import MissingToken
 from .search import DEFAULT_LIMIT, search
@@ -50,6 +51,11 @@ def cmd_enrich(args: argparse.Namespace) -> int:
 
 
 
+def cmd_comments(args: argparse.Namespace) -> int:
+    print(fetch_comments(limit=args.limit).render())
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     # Shared flags, accepted either before or after the subcommand.
     common = argparse.ArgumentParser(add_help=False)
@@ -87,6 +93,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_enrich.add_argument("--no-pdl", action="store_true",
                           help="scrape founder slugs only, spend no credits")
     p_enrich.set_defaults(func=cmd_enrich)
+
+    p_comments = sub.add_parser("comments", parents=[common],
+                                help="pull Hacker News launch threads (free)")
+    p_comments.add_argument("--limit", type=int, default=20, help="threads to pull")
+    p_comments.set_defaults(func=cmd_comments)
 
     return parser
 
