@@ -16,6 +16,7 @@ from .config import Settings, settings as default_settings
 from .db import connect
 from .models import Company
 from .repository import companies as companies_repo
+from .repository import hn_stories as stories_repo
 from .sources import hackernews, yc
 
 log = logging.getLogger(__name__)
@@ -35,10 +36,23 @@ class SourceReport:
         return self.fetched - self.usable
 
 
+def _store_stories(conn, source: str, companies: list[Company]) -> int:
+    """Write each company\'s child records. Only Hacker News has any today."""
+    written = 0
+    for company in companies:
+        if not company.stories:
+            continue
+        company_id = companies_repo.id_for(conn, source, company.source_key)
+        if company_id is not None:
+            written += stories_repo.upsert(conn, company_id, company.stories)
+    return written
+
+
 @dataclass(frozen=True)
 class SyncReport:
     sources: list[SourceReport]
     total_rows: int
+    total_stories: int = 0
 
     def render(self) -> str:
         """Human-readable table. Called by cli.cmd_sync."""
@@ -54,6 +68,8 @@ class SyncReport:
             )
         lines.append("-" * 51)
         lines.append(f"companies in database: {self.total_rows}")
+        if self.total_stories:
+            lines.append(f"hn stories written   : {self.total_stories}")
         return "\n".join(lines)
 
 
@@ -89,6 +105,7 @@ def sync(
     settings.ensure_dirs()
     batches = batches or settings.yc.batches
     reports: list[SourceReport] = []
+    stories = 0
 
     with connect(settings.db_path) as conn:
         for name, fetcher in _plan(settings, batches, limit):
@@ -99,8 +116,9 @@ def sync(
                 log.info("%s: rejected %s records with a non-company name", name, rejected)
 
             added, updated = companies_repo.upsert(conn, usable)
+            stories += _store_stories(conn, name, usable)
             reports.append(SourceReport(name, len(companies), len(usable), added, updated))
 
         total = companies_repo.count(conn)
 
-    return SyncReport(reports, total)
+    return SyncReport(reports, total, stories)

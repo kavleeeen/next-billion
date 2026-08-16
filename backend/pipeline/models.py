@@ -19,6 +19,7 @@ class Company:
     batch: str | None = None
     team_size: int | None = None
     raw: dict[str, Any] = field(default_factory=dict, repr=False)
+    stories: list["HNStory"] = field(default_factory=list, repr=False)
 
     @property
     def is_usable(self) -> bool:
@@ -40,6 +41,32 @@ class Company:
             "description": self.description,
             "batch": self.batch,
             "team_size": self.team_size,
+            "raw_json": json.dumps(self.raw, ensure_ascii=False),
+        }
+
+
+
+@dataclass(frozen=True, slots=True)
+class HNStory:
+    """One Hacker News post. Several can belong to the same company."""
+
+    story_id: str
+    title: str
+    url: str | None = None
+    points: int | None = None
+    comments: int | None = None
+    posted_at: str | None = None
+    raw: dict[str, Any] = field(default_factory=dict, repr=False)
+
+    def to_row(self, company_id: int) -> dict[str, Any]:
+        return {
+            "company_id": company_id,
+            "story_id": self.story_id,
+            "title": self.title,
+            "url": self.url,
+            "points": self.points,
+            "comments": self.comments,
+            "posted_at": self.posted_at,
             "raw_json": json.dumps(self.raw, ensure_ascii=False),
         }
 

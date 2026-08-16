@@ -26,7 +26,10 @@ def cmd_sync(args: argparse.Namespace) -> int:
 
 
 def cmd_search(args: argparse.Namespace) -> int:
-    report = search(args.term, limit=args.limit or DEFAULT_LIMIT)
+    report = search(
+        args.term, limit=args.limit or DEFAULT_LIMIT,
+        source=args.source, sort=args.sort,
+    )
     print(report.render())
     return 0 if report.found else 1
 
@@ -49,6 +52,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_search = sub.add_parser("search", parents=[common], help="keyword search the database")
     p_search.add_argument("term", help='e.g. "SMB founders"')
     p_search.add_argument("--limit", type=int)
+    p_search.add_argument("--source", choices=("yc", "hn"),
+                          help="only this connector")
+    p_search.add_argument("--sort", choices=("default", "points", "recent"),
+                          default="default",
+                          help="default: batch; points: most HN traction; "
+                               "recent: latest launch")
     p_search.set_defaults(func=cmd_search)
 
     return parser

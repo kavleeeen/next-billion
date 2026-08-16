@@ -12,6 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 
+
 @dataclass(frozen=True)
 class YCSettings:
     batches: tuple[str, ...] = ("W25", "S25", "W26")

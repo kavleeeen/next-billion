@@ -18,7 +18,13 @@ class TestParseDedupe:
         return [{"hits": [hit, other]}, {"hits": [hit]}]   # story 1 in two searches
 
     def test_hn_parse_dedupes_across_payloads(self):
-        assert [c.source_key for c in hackernews.parse(self._overlapping())] == ["1", "2"]
+        assert [c.source_key for c in hackernews.parse(self._overlapping())] == [
+            "semble", "nia"
+        ]
+
+    def test_a_story_seen_twice_is_stored_once(self):
+        company = hackernews.parse(self._overlapping())[0]
+        assert [s.story_id for s in company.stories] == ["1"]
 
     def test_yc_parse_dedupes_across_pages(self):
         page = {"companies": [{"slug": "acme", "name": "Acme"}]}
@@ -99,3 +105,85 @@ class TestHttpInjection:
 
         params = inspect.signature(get_json).parameters
         assert "timeout" in params and "retries" in params
+
+
+class TestOneCompanyManyStories:
+    """A company can launch more than once. Rowboat posted three times across
+    eleven months; storing one row per story split its traction three ways."""
+
+    def _payloads(self):
+        return [{"hits": [
+            {"objectID": "1", "title": "Show HN: Rowboat - agents",
+             "url": "https://rowboat.dev", "points": 66, "num_comments": 10,
+             "created_at_i": 1757000000},
+            {"objectID": "2", "title": "Show HN: Rowboat - now faster",
+             "url": "https://rowboat.dev", "points": 219, "num_comments": 80,
+             "created_at_i": 1767000000},
+            {"objectID": "3", "title": "Launch HN: Onyx (YC W24) - chat",
+             "url": None, "points": 254, "num_comments": 160,
+             "created_at_i": 1764000000},
+        ]}]
+
+    def test_three_stories_become_two_companies(self):
+        assert len(hackernews.parse(self._payloads())) == 2
+
+    def test_all_stories_are_kept(self):
+        rowboat = hackernews.parse(self._payloads())[0]
+        assert sorted(s.points for s in rowboat.stories) == [66, 219]
+
+    def test_company_takes_its_best_story_title(self):
+        rowboat = hackernews.parse(self._payloads())[0]
+        assert "now faster" in rowboat.one_liner
+
+    def test_traction_view_sums_the_stories(self, settings, conn):
+        from pipeline.repository import companies as companies_repo
+        from pipeline.repository import hn_stories as stories_repo
+
+        rowboat = hackernews.parse(self._payloads())[0]
+        companies_repo.upsert(conn, [rowboat])
+        company_id = companies_repo.id_for(conn, "hn", rowboat.source_key)
+        stories_repo.upsert(conn, company_id, rowboat.stories)
+
+        traction = stories_repo.traction(conn, company_id)
+        assert traction["story_count"] == 2
+        assert traction["points"] == 285
+        assert traction["first_posted_at"] < traction["last_posted_at"]
+
+
+class TestBestStoryMergeKeepsFields:
+    """The best-story swap replaced the whole Company, dropping any field the
+    winning title lacked. `website` is the only input to the PDL search
+    fallback, so a company whose top post is a text post could never be
+    enriched — leaving metric 1 uncited and override 4 pinning it at Watch."""
+
+    def _payloads(self):
+        return [{"hits": [
+            {"objectID": "1", "title": "Launch HN: Acme (YC W25) - the thing",
+             "url": "https://acme.dev", "points": 40, "num_comments": 5,
+             "created_at_i": 1757000000},
+            {"objectID": "2", "title": "Show HN: Acme - now faster",
+             "url": None, "points": 300, "num_comments": 90,
+             "created_at_i": 1767000000},
+        ]}]
+
+    def _company(self):
+        return hackernews.parse(self._payloads())[0]
+
+    def test_batch_survives_a_higher_scoring_post(self):
+        assert self._company().batch == "W25"
+
+    def test_website_survives_a_higher_scoring_text_post(self):
+        assert self._company().website == "https://acme.dev"
+
+    def test_best_story_still_wins_the_one_liner(self):
+        assert "now faster" in self._company().one_liner
+
+    def test_all_stories_are_kept(self):
+        assert sorted(s.points for s in self._company().stories) == [40, 300]
+
+    def test_order_does_not_matter(self):
+        reversed_payloads = [{"hits": list(reversed(self._payloads()[0]["hits"]))}]
+        company = hackernews.parse(reversed_payloads)[0]
+        assert (company.batch, company.website) == ("W25", "https://acme.dev")
+        assert "now faster" in company.one_liner
+

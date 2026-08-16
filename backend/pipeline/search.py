@@ -38,7 +38,12 @@ def search(
     *,
     settings: Settings = default_settings,
     limit: int = DEFAULT_LIMIT,
+    source: str | None = None,
+    sort: str = "default",
 ) -> SearchReport:
     """Keyword search over the stored companies."""
     with connect(settings.db_path) as conn:
-        return SearchReport(term, companies_repo.search(conn, term, limit=limit))
+        return SearchReport(
+            term,
+            companies_repo.search(conn, term, limit=limit, source=source, sort=sort),
+        )
