@@ -228,7 +228,7 @@ def enrich(
 
             elif use_pdl and (domain := _domain(company["website"])) and may_spend():
                 people = pdl.search_founders(
-                    domain, settings.pdl, size=MAX_FOUNDERS_PER_COMPANY
+                    domain, settings.pdl, size=SEARCH_PAGE_SIZE
                 )
                 spend(max(len(people), 1))   # a miss still costs a query
                 if people:

@@ -1,6 +1,7 @@
 """One test per defect found in review. Each fails if the defect returns."""
 import pytest
 
+from pipeline.db import connect
 from pipeline.models import Company
 from pipeline.normalize import looks_like_company_name, parse_hn_title
 from pipeline.repository import companies as repo
@@ -533,3 +534,69 @@ class TestPrepare:
         )
         report = sync(settings=settings)
         assert not hasattr(report, "threads_pulled")
+
+
+class TestEnrichSearchBranch:
+    """`size=MAX_FOUNDERS_PER_COMPANY` survived a rename and raised NameError at
+    runtime. Every existing test stubbed search_founders itself, so the branch
+    body never executed. These stub the HTTP layer instead, one level lower, so
+    the real code runs."""
+
+    def _company_with_only_a_website(self, conn):
+        from pipeline.models import Company
+        from pipeline.repository import companies as repo
+        repo.upsert(conn, [Company(source="hn", source_key="acme", name="Acme",
+                                   website="https://acme.dev")])
+        conn.commit()
+        return repo.id_for(conn, "hn", "acme")
+
+    def _fake_pdl(self, monkeypatch, hits):
+        """Stub get_json, not search_founders, so the branch body runs."""
+        from pipeline.enrich import pdl
+        seen: list[str] = []
+
+        def fake(url, **kwargs):
+            seen.append(url)
+            return {"status": 200, "data": hits}
+
+        monkeypatch.setattr(pdl, "get_json", fake)
+        monkeypatch.setenv("PDL_API_KEY", "test-key")
+        return seen
+
+    def test_the_search_path_runs(self, settings, conn, monkeypatch):
+        from pipeline.enrich import enrich
+
+        company_id = self._company_with_only_a_website(conn)
+        seen = self._fake_pdl(monkeypatch, [
+            {"full_name": "Ada L", "job_title": "co-founder", "experience": []},
+        ])
+
+        report = enrich(settings=settings, company_ids=[company_id])
+
+        assert report.via_pdl_search == 1
+        assert report.founders_found == 1
+        assert "person/search" in seen[0]
+
+    def test_the_page_size_reaches_the_request(self, settings, conn, monkeypatch):
+        from pipeline.enrich import SEARCH_PAGE_SIZE, enrich
+
+        company_id = self._company_with_only_a_website(conn)
+        seen = self._fake_pdl(monkeypatch, [])
+        enrich(settings=settings, company_ids=[company_id])
+
+        assert f"size={SEARCH_PAGE_SIZE}" in seen[0]
+
+    def test_every_founder_is_stored_not_the_first_three(self, settings, conn, monkeypatch):
+        from pipeline.enrich import enrich
+        from pipeline.repository import founders as founders_repo
+
+        company_id = self._company_with_only_a_website(conn)
+        self._fake_pdl(monkeypatch, [
+            {"full_name": f"Founder {i}", "linkedin_username": f"f{i}", "experience": []}
+            for i in range(5)
+        ])
+
+        enrich(settings=settings, company_ids=[company_id])
+
+        with connect(settings.db_path) as check:
+            assert len(founders_repo.for_company(check, company_id)) == 5
