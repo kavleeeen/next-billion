@@ -75,7 +75,7 @@ class SyncReport:
 
 
 def _plan(
-    settings: Settings, batches: tuple[str, ...], limit: int | None
+    settings: Settings, batches: tuple[str, ...], limit: int | None, hn_since: int
 ) -> list[tuple[str, Callable[[], list[Company]]]]:
     """Pair each source name with a zero-argument call that fetches it.
 
@@ -87,9 +87,8 @@ def _plan(
         (
             hackernews.NAME,
             lambda: hackernews.fetch(
-                settings.hn.queries,
                 settings.hn.min_points,
-                settings.hn.lookback_days,
+                hn_since,
                 limit,
                 workers=settings.fetch_workers,
             ),
@@ -109,9 +108,17 @@ def sync(
     reports: list[SourceReport] = []
     stories = 0
 
+    # Incremental: the floor comes from the newest story held, so a nightly run
+    # reads a handful of posts rather than a year of them.
+    with connect(settings.db_path) as conn:
+        newest = stories_repo.newest_posted_at(conn)
+    hn_since = hackernews.since_epoch(
+        newest, settings.hn.lookback_days, settings.hn.refresh_days
+    )
+
     # Independent, so fetch together. Writing stays on this thread: a SQLite
     # connection is not safe to share.
-    plan = _plan(settings, batches, limit)
+    plan = _plan(settings, batches, limit, hn_since)
     with ThreadPoolExecutor(max_workers=len(plan)) as pool:
         fetched = list(pool.map(lambda item: (item[0], item[1]()), plan))
 

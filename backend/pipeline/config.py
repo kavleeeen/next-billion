@@ -40,8 +40,8 @@ class YCSettings:
 @dataclass(frozen=True)
 class HNSettings:
     min_points: int = 30
-    lookback_days: int = 365
-    queries: tuple[str, ...] = ("agent", "LLM", "infrastructure", "developer tool")
+    lookback_days: int = 365   # first run only; later runs start from the newest story held
+    refresh_days: int = 7      # re-read this far back, so recent points stay current
 
 
 @dataclass(frozen=True)

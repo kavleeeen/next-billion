@@ -4,9 +4,9 @@ Two pools, used for different jobs:
     Launch HN - low volume, high precision. Every post is a funded company.
     Show HN   - high volume, low precision. Catches non-YC and unfunded companies.
 
-Several searches run per sync and their results overlap: one Show HN story can
-match both "agent" and "LLM". parse() deduplicates, which removes about 190
-duplicate records out of 928 on a full run.
+No topic filter. Four keyword searches returned 509 stories where an unfiltered
+Show HN search returns 1,820 — an editorial guess made at fetch time and
+invisible afterwards. The thesis gate decides that later, by a stated rule.
 """
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ import time
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
+from datetime import datetime, timezone
 from typing import Any
 
 from datetime import datetime, timezone
@@ -153,30 +154,43 @@ def _search(params: dict[str, str], limit: int | None) -> list[dict[str, Any]]:
     return payloads
 
 
+def since_epoch(newest_stored: str | None, lookback_days: int, refresh_days: int) -> int:
+    """The `created_at_i` floor for this run.
+
+    Starts before the newest story held, not at it: points keep rising after a
+    post appears, so a strictly-newer floor would freeze traction.
+    """
+    if not newest_stored:
+        return int(time.time()) - lookback_days * 86_400
+    try:
+        seen = datetime.fromisoformat(newest_stored).replace(tzinfo=timezone.utc)
+    except ValueError:
+        return int(time.time()) - lookback_days * 86_400
+    return int(seen.timestamp()) - refresh_days * 86_400
+
+
 def fetch(
-    queries: tuple[str, ...],
     min_points: int,
-    lookback_days: int,
+    since: int,
     limit: int | None = None,
     workers: int = 8,
 ) -> list[Company]:
-    """Run every search and return deduped companies. Called by sync().
+    """Both searches, from `since` onward. Called by sync().
 
-    The searches are independent, so they run concurrently.
+    Independent, so they run concurrently; parse() deduplicates the overlap.
     """
-    since = int(time.time()) - lookback_days * 86_400
-    numeric = f"points>{min_points},created_at_i>{since}"
-
     searches: list[dict[str, str]] = [
-        {"query": '"Launch HN"', "tags": "story", "numericFilters": f"created_at_i>{since}"},
-        *({"query": q, "tags": "show_hn", "numericFilters": numeric} for q in queries),
+        {"query": '"Launch HN"', "tags": "story",
+         "numericFilters": f"created_at_i>{since}"},
+        {"tags": "show_hn",
+         "numericFilters": f"points>{min_points},created_at_i>{since}"},
     ]
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
         pages = list(pool.map(lambda p: _search(p, limit), searches))
 
     payloads = [payload for group in pages for payload in group]
-    log.info("hn: %s searches, %s pages", len(searches), len(payloads))
+    log.info("hn: %s searches, %s pages, since %s", len(searches), len(payloads), since)
 
     companies = parse(payloads)
     return companies[:limit] if limit else companies

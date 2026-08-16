@@ -103,7 +103,7 @@ def stub_sources(monkeypatch):
         companies = yc.parse([YC_PAYLOAD])
         return companies[:limit] if limit else companies
 
-    def fake_hn(queries, min_points, lookback_days, limit=None, **kwargs):
+    def fake_hn(min_points, since, limit=None, **kwargs):
         calls.append("hn")
         companies = hackernews.parse([HN_PAYLOAD])
         return companies[:limit] if limit else companies

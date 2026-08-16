@@ -29,6 +29,8 @@ TRACTION = "SELECT * FROM company_traction WHERE company_id = ?"
 
 COUNT = "SELECT COUNT(*) FROM hn_stories"
 
+NEWEST = "SELECT MAX(posted_at) AS newest FROM hn_stories"
+
 # Companies with more than one launch — the signal a single story hides.
 REPEAT_LAUNCHERS = """
 SELECT c.name, t.story_count, t.points, t.first_posted_at, t.last_posted_at
@@ -64,3 +66,8 @@ def repeat_launchers(conn: sqlite3.Connection, limit: int = 10) -> list[sqlite3.
 
 def count(conn: sqlite3.Connection) -> int:
     return conn.execute(COUNT).fetchone()[0]
+
+
+def newest_posted_at(conn: sqlite3.Connection) -> str | None:
+    """Date of the most recent story held. The floor for the next fetch."""
+    return conn.execute(NEWEST).fetchone()["newest"]
