@@ -1,0 +1,13 @@
+[project]
+name = "next-billion"
+version = "0.1.0"
+description = "AI-augmented investment pipeline"
+requires-python = ">=3.11"
+dependencies = []                      # stdlib only, on purpose
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
