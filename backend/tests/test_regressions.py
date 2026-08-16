@@ -480,3 +480,56 @@ class TestMergeIsRecorded:
             traction = stories_repo.traction(conn, row["id"])
 
         assert traction["points"] == 259
+
+
+class TestPrepare:
+    """Threads moved out of sync: it could only cover 40 per run — 5% of
+    companies — and chose them by points rather than by what was selected."""
+
+    def _select(self, conn, n=2):
+        from pipeline.models import Company
+        from pipeline.repository import companies as repo
+        repo.upsert(conn, [
+            Company(source="yc", source_key=f"c{i}", name=f"Co {i}") for i in range(n)
+        ])
+        conn.commit()
+        return [r["id"] for r in conn.execute("SELECT id FROM companies")]
+
+    def _stub(self, monkeypatch):
+        from pipeline import comments as comments_module
+        from pipeline.enrich import pdl, yc_page
+        monkeypatch.setattr(
+            comments_module.comments_repo, "stories_for_companies", lambda c, ids: []
+        )
+        monkeypatch.setattr(yc_page, "founder_slugs", lambda slug: [])
+        monkeypatch.setattr(pdl, "enrich_person", lambda slug, s: None)
+
+    def test_rejects_more_than_twenty(self, settings):
+        from pipeline.prepare import MAX_SELECTION, TooManySelected, prepare
+        with pytest.raises(TooManySelected):
+            prepare(list(range(MAX_SELECTION + 1)), settings=settings)
+
+    def test_rejects_ids_that_do_not_exist(self, settings, conn):
+        from pipeline.prepare import prepare
+        self._select(conn)
+        with pytest.raises(ValueError):
+            prepare([9999], settings=settings)
+
+    def test_unknown_ids_are_dropped_not_fatal(self, settings, conn, monkeypatch):
+        from pipeline.prepare import prepare
+        ids = self._select(conn)
+        self._stub(monkeypatch)
+        report = prepare(ids + [9999], settings=settings)
+        assert report.companies == len(ids)
+
+    def test_sync_no_longer_pulls_threads(self, settings, stub_sources, monkeypatch):
+        """A network call here would mean sync is still fetching them."""
+        from pipeline import comments as comments_module
+        from pipeline.sources import hn_comments
+
+        monkeypatch.setattr(
+            hn_comments, "fetch_many",
+            lambda *a, **k: (_ for _ in ()).throw(AssertionError("sync fetched threads")),
+        )
+        report = sync(settings=settings)
+        assert not hasattr(report, "threads_pulled")

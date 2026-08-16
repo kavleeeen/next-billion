@@ -2,11 +2,11 @@
 
 Free and unauthenticated, one request per thread. Threads fetch in parallel and
 are written on one thread, because a SQLite connection is not safe to share.
-Highest-scoring threads go first — those are the ones a shortlist is likely to
-contain.
 
-Called at the end of sync() with a per-run ceiling, and available on its own as
-`pipeline comments` for a bigger backfill.
+Sync does not pull threads. It could only cover 40 per run — 5% of companies —
+and it chose them by points rather than by what anyone asked for. Threads are
+pulled for a selection instead, where 20 companies cost about five seconds and
+coverage is complete.
 """
 from __future__ import annotations
 
@@ -41,14 +41,24 @@ class CommentsReport:
 
 
 def fetch_comments(
-    *, settings: Settings = default_settings, limit: int = 20
+    *,
+    settings: Settings = default_settings,
+    limit: int = 20,
+    company_ids: list[int] | None = None,
 ) -> CommentsReport:
-    """Pull up to `limit` threads in parallel, then write them."""
+    """Pull threads in parallel, then write them.
+
+    `company_ids` takes every unfetched thread those companies have, ignoring
+    `limit` — a selected company needs all of its threads, not the loudest one.
+    """
     settings.ensure_dirs()
     stored = op = 0
 
     with connect(settings.db_path) as conn:
-        pending = comments_repo.stories_needing_comments(conn, limit)
+        pending = (
+            comments_repo.stories_for_companies(conn, company_ids) if company_ids
+            else comments_repo.stories_needing_comments(conn, limit)
+        )
         if not pending:
             return CommentsReport(
                 0, 0, 0, comments_repo.count(conn), comments_repo.count_op(conn)

@@ -43,9 +43,6 @@ class HNSettings:
     lookback_days: int = 365   # first run only; later runs start from the newest story held
     refresh_days: int = 7      # re-read this far back, so recent points stay current
 
-    # A full backfill is ~518 threads; the cap drains it over a few runs rather
-    # than making one sync a 13-minute wait. 0 disables it.
-    comments_per_sync: int = 40
     comment_workers: int = 8   # writes stay serial; a SQLite connection is not shareable
 
 

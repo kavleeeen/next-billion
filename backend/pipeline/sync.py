@@ -14,7 +14,6 @@ from dataclasses import dataclass
 from typing import Callable
 
 from .config import Settings, settings as default_settings
-from .comments import fetch_comments
 from .db import connect
 from .merge import merge_cross_source
 from .models import Company
@@ -65,8 +64,6 @@ class SyncReport:
     total_rows: int
     total_stories: int = 0
     merged: int = 0
-    threads_pulled: int = 0
-    comments_stored: int = 0
 
     def render(self) -> str:
         """Human-readable table. Called by cli.cmd_sync."""
@@ -86,11 +83,6 @@ class SyncReport:
             lines.append(f"hn stories written   : {self.total_stories}")
         if self.merged:
             lines.append(f"cross-source merges  : {self.merged}")
-        if self.threads_pulled:
-            lines.append(
-                f"hn threads pulled    : {self.threads_pulled} "
-                f"({self.comments_stored} comments)"
-            )
         return "\n".join(lines)
 
 
@@ -121,14 +113,9 @@ def sync(
     settings: Settings = default_settings,
     batches: tuple[str, ...] | None = None,
     limit: int | None = None,
-    comments: int | None = None,
 ) -> SyncReport:
     """Fetch every source and upsert into the database. Safe to re-run.
 
-    `comments` caps how many Hacker News threads are pulled at the end;
-    defaults to settings.hn.comments_per_sync, and 0 skips them. A full
-    backfill is ~518 threads, so the ceiling keeps any single run short while
-    the backlog drains over several.
     """
     settings.ensure_dirs()
     batches = batches or settings.yc.batches
@@ -168,12 +155,4 @@ def sync(
         merged = merge_cross_source(conn)
         total = companies_repo.count(conn)
 
-    # Outside the connection above: fetch_comments opens its own, and two write
-    # connections to one SQLite file would contend.
-    budget = settings.hn.comments_per_sync if comments is None else comments
-    threads = stored = 0
-    if budget:
-        report = fetch_comments(settings=settings, limit=budget)
-        threads, stored = report.threads, report.comments
-
-    return SyncReport(reports, total, stories, merged, threads, stored)
+    return SyncReport(reports, total, stories, merged)

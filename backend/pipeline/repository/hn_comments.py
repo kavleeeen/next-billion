@@ -27,6 +27,17 @@ ORDER BY s.points DESC
 LIMIT :limit
 """
 
+# Every unfetched thread belonging to a named set of companies. No points
+# ordering and no cap: a selected company needs all of its threads, not the
+# loudest one.
+STORIES_FOR_COMPANIES = """
+SELECT s.story_id, s.author, s.title, s.points, s.company_id
+FROM hn_stories s
+WHERE s.comments_fetched_at IS NULL AND s.comments > 0
+  AND s.company_id IN ({placeholders})
+ORDER BY s.points DESC
+"""
+
 # What the LLM reads. The submitter's own words first, then the rest.
 FOR_COMPANY = """
 SELECT c.* FROM hn_comments c
@@ -56,6 +67,17 @@ def mark_fetched(conn: sqlite3.Connection, story_id: str) -> None:
 
 def stories_needing_comments(conn: sqlite3.Connection, limit: int) -> list[sqlite3.Row]:
     return conn.execute(STORIES_NEEDING_COMMENTS, {"limit": limit}).fetchall()
+
+
+def stories_for_companies(
+    conn: sqlite3.Connection, company_ids: list[int]
+) -> list[sqlite3.Row]:
+    """Unfetched threads for these companies. Used before scoring a selection."""
+    if not company_ids:
+        return []
+    marks = ",".join("?" * len(company_ids))
+    query = STORIES_FOR_COMPANIES.format(placeholders=marks)
+    return conn.execute(query, company_ids).fetchall()
 
 
 def for_company(conn: sqlite3.Connection, company_id: int, limit: int = 20) -> list[sqlite3.Row]:

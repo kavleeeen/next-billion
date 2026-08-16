@@ -78,13 +78,10 @@ HN_PAYLOAD = {
 def settings(tmp_path: Path) -> Settings:
     """Settings pointed at a temporary database.
 
-    comments_per_sync is 0 so no test reaches the network by accident: sync()
-    pulls Hacker News threads at the end, and a test database contains stories.
+    Sync no longer pulls threads, but the fixture stays explicit: a test that
+    reaches the network is a bug that passes.
     """
-    return Settings(
-        db_path=tmp_path / "test.db",
-        hn=HNSettings(comments_per_sync=0),
-    )
+    return Settings(db_path=tmp_path / "test.db", hn=HNSettings())
 
 
 @pytest.fixture

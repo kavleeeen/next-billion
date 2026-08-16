@@ -8,6 +8,7 @@ import sys
 from .comments import fetch_comments
 from .enrich import enrich
 from .enrich.pdl import MissingToken
+from .prepare import TooManySelected, prepare
 from .search import DEFAULT_LIMIT, search
 from .sync import sync
 
@@ -23,7 +24,6 @@ def cmd_sync(args: argparse.Namespace) -> int:
     report = sync(
         batches=tuple(args.batch) if args.batch else None,
         limit=args.limit,
-        comments=args.comments,
     )
     print(report.render())
     return 0
@@ -56,6 +56,17 @@ def cmd_comments(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_prepare(args: argparse.Namespace) -> int:
+    ids = [int(x) for x in args.ids.split(",") if x.strip()]
+    try:
+        report = prepare(ids, use_pdl=not args.no_pdl)
+    except (TooManySelected, MissingToken, ValueError) as exc:
+        print(exc)
+        return 1
+    print(report.render())
+    return 0
+
+
 
 def build_parser() -> argparse.ArgumentParser:
     # Shared flags, accepted either before or after the subcommand.
@@ -70,8 +81,6 @@ def build_parser() -> argparse.ArgumentParser:
     p_sync = sub.add_parser("sync", parents=[common], help="pull sources into the database")
     p_sync.add_argument("--batch", action="append", help="YC batch, repeatable (e.g. W25)")
     p_sync.add_argument("--limit", type=int, help="cap companies per source (for testing)")
-    p_sync.add_argument("--comments", type=int,
-                        help="HN threads to pull at the end; 0 to skip")
     p_sync.set_defaults(func=cmd_sync)
 
     p_search = sub.add_parser("search", parents=[common], help="keyword search the database")
@@ -101,6 +110,13 @@ def build_parser() -> argparse.ArgumentParser:
                                 help="pull Hacker News launch threads (free)")
     p_comments.add_argument("--limit", type=int, default=20, help="threads to pull")
     p_comments.set_defaults(func=cmd_comments)
+
+    p_prepare = sub.add_parser("prepare", parents=[common],
+                               help="get selected companies ready to score")
+    p_prepare.add_argument("ids", help="company ids, comma separated (max 20)")
+    p_prepare.add_argument("--no-pdl", action="store_true",
+                           help="threads only, spend no credits")
+    p_prepare.set_defaults(func=cmd_prepare)
 
     return parser
 
