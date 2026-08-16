@@ -13,8 +13,9 @@ from __future__ import annotations
 import logging
 import time
 import urllib.parse
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
-from typing import Any, Iterator
+from typing import Any
 
 from datetime import datetime, timezone
 
@@ -131,21 +132,25 @@ def parse(payloads: list[dict[str, Any]]) -> list[Company]:
     ]
 
 
-def _search(params: dict[str, str], limit: int | None) -> Iterator[dict[str, Any]]:
-    """Yield one raw page at a time for a single Algolia query. Used by fetch()."""
+def _search(params: dict[str, str], limit: int | None) -> list[dict[str, Any]]:
+    """Every page for one query. Sequential: the page count is only known after
+    the first response."""
+    payloads: list[dict[str, Any]] = []
     collected = 0
+
     for page in range(MAX_PAGES):
         query = urllib.parse.urlencode({**params, "page": page, "hitsPerPage": PAGE_SIZE})
         payload = get_json(f"{BASE_URL}?{query}")
         hits = payload.get("hits") or []
         if not hits:
-            return
+            break
 
-        yield payload
+        payloads.append(payload)
         collected += len(hits)
         if (limit and collected >= limit) or page + 1 >= (payload.get("nbPages") or 1):
-            return
-        time.sleep(0.2)  # the API asks for no key; do not hammer it
+            break
+
+    return payloads
 
 
 def fetch(
@@ -153,8 +158,12 @@ def fetch(
     min_points: int,
     lookback_days: int,
     limit: int | None = None,
+    workers: int = 8,
 ) -> list[Company]:
-    """Run every search and return deduped companies. Called by sync()."""
+    """Run every search and return deduped companies. Called by sync().
+
+    The searches are independent, so they run concurrently.
+    """
     since = int(time.time()) - lookback_days * 86_400
     numeric = f"points>{min_points},created_at_i>{since}"
 
@@ -163,13 +172,11 @@ def fetch(
         *({"query": q, "tags": "show_hn", "numericFilters": numeric} for q in queries),
     ]
 
-    payloads: list[dict[str, Any]] = []
-    for params in searches:
-        for payload in _search(params, limit):
-            payloads.append(payload)
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        pages = list(pool.map(lambda p: _search(p, limit), searches))
 
-        log.info("hn %r: %s distinct stories so far", params["query"], len(parse(payloads)))
-        if limit and len(parse(payloads)) >= limit:
-            return parse(payloads)[:limit]
+    payloads = [payload for group in pages for payload in group]
+    log.info("hn: %s searches, %s pages", len(searches), len(payloads))
 
-    return parse(payloads)
+    companies = parse(payloads)
+    return companies[:limit] if limit else companies

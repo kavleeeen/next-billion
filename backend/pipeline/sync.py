@@ -9,6 +9,7 @@ This module knows no source JSON shapes. Each source owns its own parse().
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Callable
 
@@ -82,7 +83,7 @@ def _plan(
     refers to a specific source.
     """
     return [
-        (yc.NAME, lambda: yc.fetch(batches, limit)),
+        (yc.NAME, lambda: yc.fetch(batches, limit, workers=settings.fetch_workers)),
         (
             hackernews.NAME,
             lambda: hackernews.fetch(
@@ -90,6 +91,7 @@ def _plan(
                 settings.hn.min_points,
                 settings.hn.lookback_days,
                 limit,
+                workers=settings.fetch_workers,
             ),
         ),
     ]
@@ -107,10 +109,14 @@ def sync(
     reports: list[SourceReport] = []
     stories = 0
 
-    with connect(settings.db_path) as conn:
-        for name, fetcher in _plan(settings, batches, limit):
-            companies = fetcher()
+    # Independent, so fetch together. Writing stays on this thread: a SQLite
+    # connection is not safe to share.
+    plan = _plan(settings, batches, limit)
+    with ThreadPoolExecutor(max_workers=len(plan)) as pool:
+        fetched = list(pool.map(lambda item: (item[0], item[1]()), plan))
 
+    with connect(settings.db_path) as conn:
+        for name, companies in fetched:
             usable = [company for company in companies if company.is_usable]
             if rejected := len(companies) - len(usable):
                 log.info("%s: rejected %s records with a non-company name", name, rejected)

@@ -7,6 +7,7 @@ Returns {"companies": [...], "page", "nextPage", "totalPages"}. No key needed.
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from ..http import get_json
@@ -30,7 +31,8 @@ def _to_company(record: dict[str, Any]) -> Company:
         description=record.get("longDescription"),
         batch=record.get("batch"),
         team_size=record.get("teamSize"),
-        # YC's own tagging, already in the payload. Input to metric 3.
+        # YC's own tagging. Direct input to metric 3, and free — it was already
+        # in the payload, just never pulled out.
         industries=record.get("industries") or [],
         raw=record,
     )
@@ -52,24 +54,34 @@ def parse(payloads: list[dict[str, Any]]) -> list[Company]:
     return companies
 
 
-def fetch(batches: tuple[str, ...], limit: int | None = None) -> list[Company]:
-    """Pull every page of each batch. Called by sync()."""
-    payloads: list[dict[str, Any]] = []
+def _page(batch: str, page: int) -> dict[str, Any]:
+    return get_json(f"{BASE_URL}?batch={batch}&page={page}")
 
-    for batch in batches:
-        page = 1
-        while page <= MAX_PAGES:
-            payload = get_json(f"{BASE_URL}?batch={batch}&page={page}")
-            if not (payload.get("companies") or []):
-                break
 
-            payloads.append(payload)
-            log.info("yc %s page %s: %s companies", batch, page, len(payload["companies"]))
+def fetch(
+    batches: tuple[str, ...], limit: int | None = None, workers: int = 8
+) -> list[Company]:
+    """Pull every page of each batch. Called by sync().
 
-            if limit and len(parse(payloads)) >= limit:
-                return parse(payloads)[:limit]
-            if page >= (payload.get("totalPages") or page):
-                break
-            page += 1
+    Two waves. The first page of each batch is fetched concurrently and also
+    reports `totalPages`; every remaining page across every batch is then
+    fetched in one concurrent wave. Pagination is a known range once page 1 is
+    in hand, so there is no reason to walk it one request at a time.
+    """
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        firsts = list(pool.map(lambda b: (b, _page(b, 1)), batches))
 
-    return parse(payloads)
+        payloads = [payload for _, payload in firsts if payload.get("companies")]
+        if limit and len(parse(payloads)) >= limit:
+            return parse(payloads)[:limit]
+
+        rest = [
+            (batch, page)
+            for batch, payload in firsts
+            for page in range(2, min(payload.get("totalPages") or 1, MAX_PAGES) + 1)
+        ]
+        log.info("yc: %s batches, %s further pages", len(batches), len(rest))
+        payloads += [p for p in pool.map(lambda bp: _page(*bp), rest) if p.get("companies")]
+
+    companies = parse(payloads)
+    return companies[:limit] if limit else companies

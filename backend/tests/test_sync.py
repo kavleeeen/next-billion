@@ -42,7 +42,7 @@ class TestSync:
 
         seen: list[tuple] = []
         monkeypatch.setattr(sync_module.yc, "fetch",
-                            lambda batches, limit=None: seen.append(batches) or [])
+                            lambda batches, limit=None, **kw: seen.append(batches) or [])
         monkeypatch.setattr(sync_module.hackernews, "fetch", lambda *a, **k: [])
 
         sync(settings=settings, batches=("S24",))

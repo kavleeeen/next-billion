@@ -70,6 +70,8 @@ class Settings:
     http_timeout: float = 20.0
     http_retries: int = 3
 
+    fetch_workers: int = 8   # network-bound, so concurrency buys latency, not CPU
+
     # One block per source. GitHub is in docs/decisions/0001-sources.md as an
     # accepted source but is not built yet, so it has no settings block here —
     # config describes what the code does, not what it will do.
