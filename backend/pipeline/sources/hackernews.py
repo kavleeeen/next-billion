@@ -18,8 +18,6 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any
 
-from datetime import datetime, timezone
-
 from ..http import get_json
 from ..models import Company, HNStory
 from ..normalize import parse_hn_title
