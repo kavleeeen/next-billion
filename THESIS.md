@@ -150,10 +150,10 @@ The total keeps its value. The memo shows both.
 **Rule 4 — No founder evidence.** A company with no founder record cannot
 exceed **Watch**, whatever the total. The memo names the reason.
 
-Rule 4 exists because founder data is the one input that costs money to obtain,
-so it is fetched on demand rather than for every company. Without it, metric 1
-is uncited and rule 3 caps it at 50 — which still leaves a company able to reach
-70 on the other four metrics alone:
+Rule 4 exists because founder data is the one input that costs money to obtain.
+It is not fetched for every company, so a score could otherwise be produced for
+a company whose founders nobody has looked at. Without the rule, metric 1 is
+uncited, rule 3 caps it at 50, and the other four metrics alone still reach 70:
 
 | Metric | Score | Weight | Contribution |
 |---|---|---|---|
@@ -166,12 +166,29 @@ is uncited and rule 3 caps it at 50 — which still leaves a company able to rea
 Total 79.8, which would otherwise read **Take a meeting** for a company whose
 founders we never looked at. Rule 4 holds it at Watch until someone does.
 
-This makes scoring a two-pass process on purpose:
+## What gets scored
 
-| Pass | Runs on | Reads | Produces |
-|---|---|---|---|
-| Cheap | every company | metrics 3, 4, 5 and the free part of 2 | a ranking, to pick a shortlist |
-| Full | the shortlist only | everything, after founder enrichment | a verdict and a memo |
+Nothing is scored automatically. A partner searches the collected companies,
+reads the list, and selects **up to 20**. Only those are analysed.
+
+```
+search        →  candidates from the database, instant, no AI
+select        →  a person picks up to 20
+enrich        →  founders and launch threads for those 20 only
+score         →  all five metrics, then the overrides
+memo          →  one per company
+```
+
+There is no automatic ranking pass. Ranking a thousand companies on the
+evidence that is free for all of them — a description and a points count —
+would produce an ordering the thesis cannot defend, and it would decide which
+companies get looked at properly. That decision stays with the partner.
+
+The consequence is that every scored company has been enriched first, so
+metric 1 is normally cited and rule 4 rarely fires. When it does fire it means
+something specific: enrichment ran and found nothing — no YC page, no website
+to search, or no record at the provider. That is worth seeing in a memo rather
+than hiding behind a number.
 
 ## Blind spots
 
