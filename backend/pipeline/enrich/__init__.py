@@ -40,7 +40,9 @@ from . import pdl, yc_page
 
 log = logging.getLogger(__name__)
 
-MAX_FOUNDERS_PER_COMPANY = 3
+# How many founders PDL search may return per company. Not a cap on how many
+# are stored — a company with eight founders gets eight rows.
+SEARCH_PAGE_SIZE = 10
 
 # Suffixes needing three labels rather than two.
 _MULTI_LABEL_TLDS = {"co.uk", "com.au", "co.in", "com.br", "co.jp", "co.nz"}
@@ -216,7 +218,7 @@ def enrich(
             if slugs:
                 via_yc += 1
                 source_url = yc_page.page_url(company["source_key"])
-                for slug in slugs[:MAX_FOUNDERS_PER_COMPANY]:
+                for slug in slugs:
                     person = None
                     if use_pdl and may_spend():
                         person = pdl.enrich_person(slug, settings.pdl)
