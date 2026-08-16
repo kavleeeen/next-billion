@@ -9,10 +9,10 @@ from ..models import Company
 
 UPSERT = """
 INSERT INTO companies (source, source_key, name, website, one_liner,
-                       description, batch, team_size, raw_json,
+                       description, batch, team_size, industries, raw_json,
                        created_at, updated_at)
 VALUES (:source, :source_key, :name, :website, :one_liner,
-        :description, :batch, :team_size, :raw_json, :now, :now)
+        :description, :batch, :team_size, :industries, :raw_json, :now, :now)
 ON CONFLICT (source, source_key) DO UPDATE SET
     name        = excluded.name,
     website     = excluded.website,
@@ -20,6 +20,7 @@ ON CONFLICT (source, source_key) DO UPDATE SET
     description = excluded.description,
     batch       = excluded.batch,
     team_size   = excluded.team_size,
+    industries  = excluded.industries,
     raw_json    = excluded.raw_json,
     updated_at  = excluded.updated_at
 """

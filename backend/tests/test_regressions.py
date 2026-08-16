@@ -295,3 +295,20 @@ class TestPdlDomainAllowlist:
             lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not be called")),
         )
         assert pdl.search_founders("evil' OR '1'='1", real.pdl) == []
+
+
+class TestIndustries:
+    """YC tags every company. It was in the payload and never extracted."""
+
+    def test_industries_are_stored(self, conn):
+        from pipeline.repository import companies as repo
+        from pipeline.sources import yc
+
+        repo.upsert(conn, [yc._to_company(
+            {"slug": "x", "name": "X", "industries": ["B2B", "Engineering"]})])
+        stored = conn.execute("SELECT industries FROM companies").fetchone()
+        assert stored["industries"] == '["B2B", "Engineering"]'
+
+    def test_missing_industries_become_an_empty_list(self):
+        from pipeline.sources import yc
+        assert yc._to_company({"slug": "x", "name": "X"}).industries == []

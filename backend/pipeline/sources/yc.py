@@ -30,6 +30,8 @@ def _to_company(record: dict[str, Any]) -> Company:
         description=record.get("longDescription"),
         batch=record.get("batch"),
         team_size=record.get("teamSize"),
+        # YC's own tagging, already in the payload. Input to metric 3.
+        industries=record.get("industries") or [],
         raw=record,
     )
 

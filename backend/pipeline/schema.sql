@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS companies (
     description TEXT,
     batch       TEXT,
     team_size   INTEGER,
+    industries  TEXT,                      -- JSON array, YC's own tagging
     raw_json    TEXT,                      -- the source record, unmodified
     created_at  TEXT    NOT NULL,
     updated_at  TEXT    NOT NULL,

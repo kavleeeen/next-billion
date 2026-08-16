@@ -18,6 +18,7 @@ class Company:
     description: str | None = None
     batch: str | None = None
     team_size: int | None = None
+    industries: list[str] = field(default_factory=list)
     raw: dict[str, Any] = field(default_factory=dict, repr=False)
     stories: list["HNStory"] = field(default_factory=list, repr=False)
 
@@ -41,6 +42,7 @@ class Company:
             "description": self.description,
             "batch": self.batch,
             "team_size": self.team_size,
+            "industries": json.dumps(self.industries, ensure_ascii=False),
             "raw_json": json.dumps(self.raw, ensure_ascii=False),
         }
 
