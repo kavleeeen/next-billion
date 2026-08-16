@@ -33,7 +33,7 @@ class TestParseDedupe:
     def test_sync_stores_each_story_once(self, settings, stub_sources):
         """parse() is the only path into the database, so dedupe always applies."""
         report = sync(settings=settings)
-        assert report.total_rows == 5
+        assert report.total_rows == 4          # Browser Use appears in both sources
         assert all(r.fetched == r.usable for r in report.sources)
 
 
@@ -297,6 +297,66 @@ class TestPdlDomainAllowlist:
         assert pdl.search_founders("evil' OR '1'='1", real.pdl) == []
 
 
+class TestCrossSourceMerge:
+    """The two sources carry disjoint evidence: YC has descriptions and team
+    size, HN has launch traction. Stored separately, no company had both."""
+
+    def _rows(self, conn):
+        return conn.execute(
+            "SELECT * FROM companies ORDER BY name"
+        ).fetchall()
+
+    def test_a_company_in_both_sources_becomes_one_row(self, settings, stub_sources):
+        from pipeline.db import connect
+
+        report = sync(settings=settings)
+        assert report.merged == 1
+
+        with connect(settings.db_path) as conn:
+            names = [r["name"] for r in self._rows(conn)]
+        assert names.count("Browser Use") == 1
+
+    def test_the_surviving_row_has_both_signals(self, settings, stub_sources):
+        from pipeline.db import connect
+        from pipeline.repository import hn_stories as stories_repo
+
+        sync(settings=settings)
+        with connect(settings.db_path) as conn:
+            row = conn.execute(
+                "SELECT * FROM companies WHERE name = 'Browser Use'"
+            ).fetchone()
+            traction = stories_repo.traction(conn, row["id"])
+
+        assert row["source"] == "yc"          # the richer row survives
+        assert row["team_size"] == 4          # YC evidence
+        assert traction["points"] == 259      # HN evidence, on the same company
+
+    def test_a_conflicting_batch_blocks_the_merge(self, settings, conn):
+        """A name match alone is too loose. Two companies can share a name."""
+        from pipeline.merge import merge_cross_source
+        from pipeline.models import Company
+        from pipeline.repository import companies as repo
+
+        repo.upsert(conn, [
+            Company(source="yc", source_key="acme", name="Acme", batch="W25"),
+            Company(source="hn", source_key="acme", name="Acme", batch="S21"),
+        ])
+        assert merge_cross_source(conn) == 0
+        assert repo.count(conn) == 2
+
+    def test_no_batch_on_the_hn_row_still_merges(self, settings, conn):
+        from pipeline.merge import merge_cross_source
+        from pipeline.models import Company
+        from pipeline.repository import companies as repo
+
+        repo.upsert(conn, [
+            Company(source="yc", source_key="acme", name="Acme", batch="W25"),
+            Company(source="hn", source_key="acme", name="Acme"),
+        ])
+        assert merge_cross_source(conn) == 1
+        assert repo.count(conn) == 1
+
+
 class TestIndustries:
     """YC tags every company. It was in the payload and never extracted."""
 
@@ -304,11 +364,119 @@ class TestIndustries:
         from pipeline.repository import companies as repo
         from pipeline.sources import yc
 
-        repo.upsert(conn, [yc._to_company(
-            {"slug": "x", "name": "X", "industries": ["B2B", "Engineering"]})])
+        company = yc._to_company(
+            {"slug": "x", "name": "X", "industries": ["B2B", "Engineering"]}
+        )
+        repo.upsert(conn, [company])
         stored = conn.execute("SELECT industries FROM companies").fetchone()
         assert stored["industries"] == '["B2B", "Engineering"]'
 
     def test_missing_industries_become_an_empty_list(self):
         from pipeline.sources import yc
         assert yc._to_company({"slug": "x", "name": "X"}).industries == []
+
+
+class TestMergeDoesNotDestroyPaidData:
+    """`UPDATE OR REPLACE` deletes the row already on the surviving company and
+    keeps the incoming one — discarding a yc_page founder with paid-for prior
+    roles in favour of an inferred pdl_search row with none."""
+
+    def _pair(self, conn):
+        from pipeline.models import Company, Founder
+        from pipeline.repository import companies as repo
+        from pipeline.repository import founders as founders_repo
+
+        repo.upsert(conn, [
+            Company(source="yc", source_key="acme", name="Acme", batch="W25"),
+            Company(source="hn", source_key="acme", name="Acme", batch="W25"),
+        ])
+        keep = repo.id_for(conn, "yc", "acme")
+        drop = repo.id_for(conn, "hn", "acme")
+
+        founders_repo.upsert(conn, [
+            Founder(company_id=keep, linkedin_slug="jane", source_url="https://yc",
+                    discovered_via="yc_page", name="Jane", pdl_matched=True,
+                    current_title="co-founder", prior_roles=[{"title": "eng"}]),
+            Founder(company_id=drop, linkedin_slug="jane", source_url="https://acme.dev",
+                    discovered_via="pdl_search", name="Jane"),
+        ])
+        return keep
+
+    def test_the_paid_founder_row_survives(self, conn):
+        from pipeline.merge import merge_cross_source
+        from pipeline.repository import founders as founders_repo
+
+        keep = self._pair(conn)
+        merge_cross_source(conn)
+        rows = founders_repo.for_company(conn, keep)
+
+        assert len(rows) == 1
+        assert rows[0]["discovered_via"] == "yc_page"
+        assert rows[0]["pdl_matched"] == 1
+        assert rows[0]["current_title"] == "co-founder"
+
+
+class TestMergeAmbiguity:
+    """A batch-less HN row matched every same-named YC row, so the loop folded
+    twice and the stories landed on whichever the join returned first. Live
+    data holds one such case: candor and candor-security are both "Candor",
+    both W25."""
+
+    def test_two_yc_rows_with_one_name_block_the_merge(self, conn):
+        from pipeline.merge import merge_cross_source
+        from pipeline.models import Company
+        from pipeline.repository import companies as repo
+
+        repo.upsert(conn, [
+            Company(source="yc", source_key="acme", name="Acme", batch="W25"),
+            Company(source="yc", source_key="acme-labs", name="Acme", batch="W25"),
+            Company(source="hn", source_key="acme", name="Acme"),
+        ])
+        assert merge_cross_source(conn) == 0
+        assert repo.count(conn) == 3
+
+    def test_a_single_yc_row_still_merges(self, conn):
+        from pipeline.merge import merge_cross_source
+        from pipeline.models import Company
+        from pipeline.repository import companies as repo
+
+        repo.upsert(conn, [
+            Company(source="yc", source_key="acme", name="Acme", batch="W25"),
+            Company(source="hn", source_key="acme", name="Acme"),
+        ])
+        assert merge_cross_source(conn) == 1
+        assert repo.count(conn) == 1
+
+
+class TestMergeIsRecorded:
+    """The fold has to outlive the run, or sync re-creates the row forever."""
+
+    def test_a_folded_row_is_not_recreated(self, settings, stub_sources):
+        from pipeline.db import connect
+        from pipeline.repository import merged_rows as merged_repo
+
+        sync(settings=settings)
+        with connect(settings.db_path) as conn:
+            assert merged_repo.count(conn) == 1
+            assert merged_repo.keys_for(conn, "hn") == {"browser use"}
+
+        second = sync(settings=settings)
+        assert second.merged == 0
+        assert sum(r.added for r in second.sources) == 0
+
+    def test_stories_still_reach_the_surviving_company(self, settings, stub_sources):
+        """The folded row has no id of its own, so its stories must be
+        attached to the company that absorbed it."""
+        from pipeline.db import connect
+        from pipeline.repository import hn_stories as stories_repo
+
+        sync(settings=settings)
+        sync(settings=settings)          # second run: the row is suppressed
+
+        with connect(settings.db_path) as conn:
+            row = conn.execute(
+                "SELECT id FROM companies WHERE name = 'Browser Use'"
+            ).fetchone()
+            traction = stories_repo.traction(conn, row["id"])
+
+        assert traction["points"] == 259

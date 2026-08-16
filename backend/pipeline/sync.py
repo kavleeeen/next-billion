@@ -15,9 +15,11 @@ from typing import Callable
 
 from .config import Settings, settings as default_settings
 from .db import connect
+from .merge import merge_cross_source
 from .models import Company
 from .repository import companies as companies_repo
 from .repository import hn_stories as stories_repo
+from .repository import merged_rows as merged_repo
 from .sources import hackernews, yc
 
 log = logging.getLogger(__name__)
@@ -38,12 +40,19 @@ class SourceReport:
 
 
 def _store_stories(conn, source: str, companies: list[Company]) -> int:
-    """Write each company\'s child records. Only Hacker News has any today."""
+    """Write each company\'s child records. Only Hacker News has any today.
+
+    A folded company has no row of its own, so its stories go to the company
+    that absorbed it.
+    """
     written = 0
     for company in companies:
         if not company.stories:
             continue
-        company_id = companies_repo.id_for(conn, source, company.source_key)
+        company_id = (
+            companies_repo.id_for(conn, source, company.source_key)
+            or merged_repo.target_for(conn, source, company.source_key)
+        )
         if company_id is not None:
             written += stories_repo.upsert(conn, company_id, company.stories)
     return written
@@ -54,6 +63,7 @@ class SyncReport:
     sources: list[SourceReport]
     total_rows: int
     total_stories: int = 0
+    merged: int = 0
 
     def render(self) -> str:
         """Human-readable table. Called by cli.cmd_sync."""
@@ -71,6 +81,8 @@ class SyncReport:
         lines.append(f"companies in database: {self.total_rows}")
         if self.total_stories:
             lines.append(f"hn stories written   : {self.total_stories}")
+        if self.merged:
+            lines.append(f"cross-source merges  : {self.merged}")
         return "\n".join(lines)
 
 
@@ -128,10 +140,15 @@ def sync(
             if rejected := len(companies) - len(usable):
                 log.info("%s: rejected %s records with a non-company name", name, rejected)
 
-            added, updated = companies_repo.upsert(conn, usable)
+            # A row already folded into another company must not be re-created.
+            folded = merged_repo.keys_for(conn, name)
+            fresh = [c for c in usable if c.source_key not in folded]
+
+            added, updated = companies_repo.upsert(conn, fresh)
             stories += _store_stories(conn, name, usable)
             reports.append(SourceReport(name, len(companies), len(usable), added, updated))
 
+        merged = merge_cross_source(conn)
         total = companies_repo.count(conn)
 
-    return SyncReport(reports, total, stories)
+    return SyncReport(reports, total, stories, merged)

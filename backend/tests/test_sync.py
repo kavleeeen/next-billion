@@ -10,22 +10,29 @@ class TestSync:
         report = sync(settings=settings)
 
         assert stub_sources == ["yc", "hn"]
-        assert report.total_rows == 5              # 2 from YC, 3 from HN
+        # 2 from YC + 3 from HN, less Browser Use which is in both.
+        assert report.total_rows == 4
+        assert report.merged == 1
         assert {r.source for r in report.sources} == {"yc", "hn"}
 
     def test_is_idempotent(self, settings, stub_sources):
         first = sync(settings=settings)
         second = sync(settings=settings)
 
-        assert sum(r.added for r in first.sources) == 5
+        assert sum(r.added for r in first.sources) == 5   # before the merge folds one
+        # The property sync() advertises: a second run inserts nothing. The
+        # merge deletes the HN twin, so without a record of the fold the next
+        # run would re-create it and merge it again, every time.
         assert sum(r.added for r in second.sources) == 0
-        assert second.total_rows == first.total_rows
+        assert second.merged == 0
+        assert second.total_rows == first.total_rows == 4
 
     def test_limit_caps_each_source(self, settings, stub_sources):
         report = sync(settings=settings, limit=1)
 
-        assert report.total_rows == 2              # 1 per source
+        # One per source, and both are Browser Use, so they fold into one.
         assert all(r.fetched == 1 for r in report.sources)
+        assert report.total_rows == 1
 
     def test_keeps_text_posts(self, settings, stub_sources):
         sync(settings=settings)
@@ -52,7 +59,7 @@ class TestSync:
 class TestSyncReport:
     def test_renders(self, settings, stub_sources):
         rendered = sync(settings=settings).render()
-        assert "companies in database: 5" in rendered
+        assert "companies in database: 4" in rendered
         assert "yc" in rendered and "hn" in rendered
 
     def test_reports_rejected_count(self, settings, monkeypatch):

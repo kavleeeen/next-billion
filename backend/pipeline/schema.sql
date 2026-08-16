@@ -94,18 +94,30 @@ CREATE TABLE IF NOT EXISTS pdl_usage (
 CREATE INDEX IF NOT EXISTS idx_pdl_usage_at ON pdl_usage (called_at);
 
 -- Founders answer questions in their own launch thread: where they worked, why
--- now, who the users are. Every line has a permalink, so a claim taken from one
--- is citable. `is_op` marks the submitter's own words.
+-- now, who the users are. It is the only free source of a founder speaking for
+-- themselves, every line has a permalink, and it is what the LLM reads when
+-- scoring metrics 1 and 4.
 CREATE TABLE IF NOT EXISTS hn_comments (
     id          INTEGER PRIMARY KEY,
     story_id    TEXT    NOT NULL,          -- hn_stories.story_id
     comment_id  TEXT    NOT NULL UNIQUE,   -- Algolia objectID
     author      TEXT,
     text        TEXT    NOT NULL,          -- HTML stripped
-    is_op       INTEGER NOT NULL DEFAULT 0,
+    is_op       INTEGER NOT NULL DEFAULT 0,-- written by the story submitter
     posted_at   TEXT,
     created_at  TEXT    NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_hn_comments_story ON hn_comments (story_id);
 CREATE INDEX IF NOT EXISTS idx_hn_comments_op ON hn_comments (story_id, is_op);
+
+-- A folded row must not come back. Without this, sync re-inserts the Hacker
+-- News twin every run and merge deletes it again, so `added` never settles at
+-- zero and "safe to re-run" stops being true.
+CREATE TABLE IF NOT EXISTS merged_rows (
+    source      TEXT    NOT NULL,          -- the connector the row came from
+    source_key  TEXT    NOT NULL,          -- its natural key
+    company_id  INTEGER NOT NULL REFERENCES companies (id) ON DELETE CASCADE,
+    merged_at   TEXT    NOT NULL,
+    PRIMARY KEY (source, source_key)
+);

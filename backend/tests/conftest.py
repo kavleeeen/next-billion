@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from pipeline.config import Settings
+from pipeline.config import HNSettings, Settings
 from pipeline.db import connect
 
 # Trimmed copies of real API responses, so parsing is tested against the
@@ -77,7 +77,7 @@ HN_PAYLOAD = {
 @pytest.fixture
 def settings(tmp_path: Path) -> Settings:
     """Settings pointed at a temporary database."""
-    return Settings(db_path=tmp_path / "test.db")
+    return Settings(db_path=tmp_path / "test.db", hn=HNSettings())
 
 
 @pytest.fixture
