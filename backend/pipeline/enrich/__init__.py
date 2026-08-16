@@ -14,9 +14,15 @@ Two strategies, tried in that order:
 Feeds metric 1 of the thesis. Where PDL has no record the founder is still
 stored, and metric 1 falls back to its second tier, which caps at 79.
 
-Credits are the constraint — the free plan allows 100 lookups a month — so a
-company that already has founders is skipped, and no run may exceed
-settings.pdl.max_calls_per_run.
+Credits are the constraint. Four guards, all on by default:
+  * a company that already has founders is skipped unless force=True
+  * no run may exceed settings.pdl.max_calls_per_run
+  * no calendar month may exceed settings.pdl.monthly_credit_cap, counted in
+    the `pdl_usage` table so the ceiling survives across processes
+  * the token is checked once before any call, so a missing key costs nothing
+
+Each company commits on its own. A failure part-way through keeps the founders
+already bought instead of rolling the whole run back.
 """
 from __future__ import annotations
 
@@ -29,6 +35,7 @@ from ..db import connect
 from ..models import Founder
 from ..repository import companies as companies_repo
 from ..repository import founders as founders_repo
+from ..repository import pdl_usage as usage_repo
 from . import pdl, yc_page
 
 log = logging.getLogger(__name__)
@@ -50,7 +57,9 @@ class EnrichReport:
     pdl_matched: int
     added: int
     updated: int
-    budget_stopped: bool
+    stopped: str | None          # None, 'run_cap' or 'monthly_cap'
+    spent_this_month: int
+    monthly_cap: int
     total_founders: int
     total_matched: int
 
@@ -66,9 +75,12 @@ class EnrichReport:
             f"with prior roles    : {self.pdl_matched}  ({rate})",
             f"rows added/updated  : {self.added}/{self.updated}",
         ]
-        if self.budget_stopped:
+        if self.stopped == "run_cap":
             lines.append("stopped early: hit pdl.max_calls_per_run")
+        elif self.stopped == "monthly_cap":
+            lines.append("stopped early: hit pdl.monthly_credit_cap")
         lines.append("-" * 46)
+        lines.append(f"credits used this month: {self.spent_this_month} of {self.monthly_cap}")
         lines.append(
             f"founders in database   : {self.total_founders} "
             f"({self.total_matched} with prior roles)"
@@ -150,22 +162,38 @@ def enrich(
     use_pdl=False finds YC founders by name only and spends nothing.
     """
     settings.ensure_dirs()
+
+    # Fail before spending anything if the key is missing.
+    if use_pdl and not settings.pdl.token:
+        raise pdl.MissingToken(
+            f"{settings.pdl.token_env} is not set. Put it in .env at the repo root."
+        )
+
     calls = matched = found = added = updated = skipped = 0
     via_yc = via_search = 0
-    budget_stopped = False
+    stopped: str | None = None
 
     with connect(settings.db_path) as conn:
+        month_start = usage_repo.spent_this_month(conn)
 
         def may_spend(n: int = 1) -> bool:
-            nonlocal budget_stopped
+            """Both ceilings, checked before every call."""
+            nonlocal stopped
             if calls + n > settings.pdl.max_calls_per_run:
-                budget_stopped = True
+                stopped = "run_cap"
+                return False
+            if month_start + calls + n > settings.pdl.monthly_credit_cap:
+                stopped = "monthly_cap"
                 return False
             return True
 
         def spend(n: int) -> None:
+            """Record credits the moment they are consumed, then commit, so a
+            later failure cannot lose the record of money already spent."""
             nonlocal calls
             calls += n
+            usage_repo.record(conn, n)
+            conn.commit()
 
         companies = (
             companies_repo.by_ids(conn, company_ids) if company_ids
@@ -213,9 +241,11 @@ def enrich(
             company_added, company_updated = founders_repo.upsert(conn, batch)
             added += company_added
             updated += company_updated
+            conn.commit()   # keep what this company bought, whatever happens next
 
         total = founders_repo.count(conn)
         total_matched = founders_repo.count_matched(conn)
+        spent = usage_repo.spent_this_month(conn)
 
     return EnrichReport(
         companies=len(companies),
@@ -227,7 +257,9 @@ def enrich(
         pdl_matched=matched,
         added=added,
         updated=updated,
-        budget_stopped=budget_stopped,
+        stopped=stopped,
+        spent_this_month=spent,
+        monthly_cap=settings.pdl.monthly_credit_cap,
         total_founders=total,
         total_matched=total_matched,
     )

@@ -53,6 +53,9 @@ class PDLSettings:
     base_url: str = "https://api.peopledatalabs.com/v5/person/enrich"
     # Ceiling for one run, so a single mistake cannot drain the allowance.
     max_calls_per_run: int = 25
+    # Ceiling across every run in a calendar month, tracked in `pdl_usage`.
+    # The free plan allows 100.
+    monthly_credit_cap: int = 100
 
     @property
     def token(self) -> str | None:

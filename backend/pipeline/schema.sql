@@ -79,3 +79,13 @@ SELECT company_id,
 FROM hn_stories
 GROUP BY company_id;
 
+-- Credits are a shared monthly budget, so the spend has to outlive one process.
+-- max_calls_per_run alone bounds a single call; N HTTP requests would otherwise
+-- allow N x that against a 100/month plan.
+CREATE TABLE IF NOT EXISTS pdl_usage (
+    id        INTEGER PRIMARY KEY,
+    called_at TEXT    NOT NULL,     -- ISO timestamp
+    calls     INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_pdl_usage_at ON pdl_usage (called_at);

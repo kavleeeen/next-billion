@@ -7,6 +7,7 @@ at settings.pdl.max_calls_per_run.
 from __future__ import annotations
 
 import logging
+import re
 import urllib.parse
 from typing import Any
 
@@ -75,6 +76,11 @@ SEARCH_URL = "https://api.peopledatalabs.com/v5/person/search"
 # Search bills per record returned, so filtering here is the difference between
 # 2 credits and 61 for one company. It is also more precise: composio's first
 # unfiltered result is a forward deployed engineer, not a founder.
+# The domain reaches us from a website field in an HN or YC record, and it is
+# interpolated into SQL. Anything outside this set is rejected rather than
+# escaped.
+_SAFE_DOMAIN = re.compile(r"^[a-z0-9][a-z0-9.-]{0,252}[a-z0-9]$")
+
 FOUNDER_SQL = (
     "SELECT * FROM person "
     "WHERE job_company_website = '{domain}' AND job_title_levels = 'owner'"
@@ -94,8 +100,13 @@ def search_founders(
             f"{settings.token_env} is not set. Put it in .env at the repo root."
         )
 
+    domain = (domain or "").strip().lower()
+    if not _SAFE_DOMAIN.match(domain):
+        log.warning("pdl search: rejected domain %r", domain)
+        return []
+
     query = urllib.parse.urlencode({
-        "sql": FOUNDER_SQL.format(domain=domain.replace("'", "")),
+        "sql": FOUNDER_SQL.format(domain=domain),
         "size": size,
     })
     try:

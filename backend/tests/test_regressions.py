@@ -187,3 +187,111 @@ class TestBestStoryMergeKeepsFields:
         assert (company.batch, company.website) == ("W25", "https://acme.dev")
         assert "now faster" in company.one_liner
 
+
+class TestEnrichCreditGuards:
+    """On-demand enrichment bypassed the "needs founders" query, so each POST
+    re-bought founders already paid for. max_calls_per_run was also a local, so
+    N requests allowed N x that against a shared monthly plan."""
+
+    def _company(self, conn):
+        from pipeline.models import Company
+        from pipeline.repository import companies as repo
+        repo.upsert(conn, [Company(source="yc", source_key="acme", name="Acme",
+                                   website="https://acme.dev")])
+        return repo.id_for(conn, "yc", "acme")
+
+    def _stub(self, monkeypatch, calls):
+        """No network: YC page returns one slug, PDL returns a person."""
+        from pipeline.enrich import pdl, yc_page
+        monkeypatch.setattr(yc_page, "founder_slugs", lambda slug: ["someone"])
+        monkeypatch.setattr(
+            pdl, "enrich_person",
+            lambda slug, s: calls.append(slug) or {"full_name": "Some One", "experience": []},
+        )
+
+    def test_second_call_on_the_same_company_spends_nothing(
+        self, settings, conn, monkeypatch
+    ):
+        from pipeline.enrich import enrich
+        company_id = self._company(conn)
+        conn.commit()
+        calls: list[str] = []
+        self._stub(monkeypatch, calls)
+
+        first = enrich(settings=settings, company_ids=[company_id])
+        second = enrich(settings=settings, company_ids=[company_id])
+
+        assert (first.pdl_calls, second.pdl_calls) == (1, 0)
+        assert second.skipped_existing == 1
+        assert len(calls) == 1
+
+    def test_force_re_buys(self, settings, conn, monkeypatch):
+        from pipeline.enrich import enrich
+        company_id = self._company(conn)
+        conn.commit()
+        calls: list[str] = []
+        self._stub(monkeypatch, calls)
+
+        enrich(settings=settings, company_ids=[company_id])
+        forced = enrich(settings=settings, company_ids=[company_id], force=True)
+
+        assert forced.pdl_calls == 1
+        assert len(calls) == 2
+
+    def test_monthly_cap_survives_separate_runs(self, settings, conn, monkeypatch):
+        """The cap is stored, not a local, so a second run cannot get a fresh one."""
+        from dataclasses import replace
+
+        from pipeline.enrich import enrich
+        from pipeline.models import Company
+        from pipeline.repository import companies as repo
+
+        repo.upsert(conn, [
+            Company(source="yc", source_key=f"c{i}", name=f"Co {i}") for i in range(4)
+        ])
+        conn.commit()
+        self._stub(monkeypatch, [])
+        capped = replace(settings, pdl=replace(settings.pdl, monthly_credit_cap=2))
+
+        one = enrich(settings=capped, limit=2)
+        two = enrich(settings=capped, limit=2)
+
+        assert one.pdl_calls + two.pdl_calls == 2
+        assert two.stopped == "monthly_cap"
+
+    def test_missing_token_raises_before_spending(self, settings, monkeypatch):
+        from pipeline.enrich import enrich, pdl
+
+        monkeypatch.delenv(settings.pdl.token_env, raising=False)
+        monkeypatch.setattr(
+            pdl, "enrich_person",
+            lambda *a: (_ for _ in ()).throw(AssertionError("must not be called")),
+        )
+        with pytest.raises(pdl.MissingToken):
+            enrich(settings=settings, limit=1)
+
+
+class TestPdlDomainAllowlist:
+    """The domain is interpolated into SQL and originates in a scraped record."""
+
+    @pytest.mark.parametrize("domain, allowed", [
+        ("browser-use.com", True),
+        ("a.b-c.dev", True),
+        ("evil' OR '1'='1", False),
+        ("has space.com", False),
+        ("", False),
+        ("semi;colon.com", False),
+    ])
+    def test_only_hostname_characters_pass(self, domain, allowed):
+        from pipeline.enrich.pdl import _SAFE_DOMAIN
+        assert bool(_SAFE_DOMAIN.match(domain.strip().lower())) is allowed
+
+    def test_rejected_domain_makes_no_request(self, monkeypatch):
+        from pipeline.config import settings as real
+        from pipeline.enrich import pdl
+
+        monkeypatch.setattr(
+            pdl, "get_json",
+            lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not be called")),
+        )
+        assert pdl.search_founders("evil' OR '1'='1", real.pdl) == []
