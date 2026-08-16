@@ -76,8 +76,15 @@ HN_PAYLOAD = {
 
 @pytest.fixture
 def settings(tmp_path: Path) -> Settings:
-    """Settings pointed at a temporary database."""
-    return Settings(db_path=tmp_path / "test.db", hn=HNSettings())
+    """Settings pointed at a temporary database.
+
+    comments_per_sync is 0 so no test reaches the network by accident: sync()
+    pulls Hacker News threads at the end, and a test database contains stories.
+    """
+    return Settings(
+        db_path=tmp_path / "test.db",
+        hn=HNSettings(comments_per_sync=0),
+    )
 
 
 @pytest.fixture

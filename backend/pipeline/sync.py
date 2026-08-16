@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from .config import Settings, settings as default_settings
+from .comments import fetch_comments
 from .db import connect
 from .merge import merge_cross_source
 from .models import Company
@@ -42,8 +43,8 @@ class SourceReport:
 def _store_stories(conn, source: str, companies: list[Company]) -> int:
     """Write each company\'s child records. Only Hacker News has any today.
 
-    A folded company has no row of its own, so its stories go to the company
-    that absorbed it.
+    A company whose row was folded into another has no row of its own, so its
+    stories are attached to the company that absorbed it.
     """
     written = 0
     for company in companies:
@@ -64,6 +65,8 @@ class SyncReport:
     total_rows: int
     total_stories: int = 0
     merged: int = 0
+    threads_pulled: int = 0
+    comments_stored: int = 0
 
     def render(self) -> str:
         """Human-readable table. Called by cli.cmd_sync."""
@@ -83,6 +86,11 @@ class SyncReport:
             lines.append(f"hn stories written   : {self.total_stories}")
         if self.merged:
             lines.append(f"cross-source merges  : {self.merged}")
+        if self.threads_pulled:
+            lines.append(
+                f"hn threads pulled    : {self.threads_pulled} "
+                f"({self.comments_stored} comments)"
+            )
         return "\n".join(lines)
 
 
@@ -113,8 +121,15 @@ def sync(
     settings: Settings = default_settings,
     batches: tuple[str, ...] | None = None,
     limit: int | None = None,
+    comments: int | None = None,
 ) -> SyncReport:
-    """Fetch every source and upsert into the database. Safe to re-run."""
+    """Fetch every source and upsert into the database. Safe to re-run.
+
+    `comments` caps how many Hacker News threads are pulled at the end;
+    defaults to settings.hn.comments_per_sync, and 0 skips them. A full
+    backfill is ~518 threads, so the ceiling keeps any single run short while
+    the backlog drains over several.
+    """
     settings.ensure_dirs()
     batches = batches or settings.yc.batches
     reports: list[SourceReport] = []
@@ -128,8 +143,8 @@ def sync(
         newest, settings.hn.lookback_days, settings.hn.refresh_days
     )
 
-    # Independent, so fetch together. Writing stays on this thread: a SQLite
-    # connection is not safe to share.
+    # The sources are independent, so fetch them at the same time. Writing stays
+    # on this thread: a SQLite connection is not safe to share.
     plan = _plan(settings, batches, limit, hn_since)
     with ThreadPoolExecutor(max_workers=len(plan)) as pool:
         fetched = list(pool.map(lambda item: (item[0], item[1]()), plan))
@@ -140,7 +155,8 @@ def sync(
             if rejected := len(companies) - len(usable):
                 log.info("%s: rejected %s records with a non-company name", name, rejected)
 
-            # A row already folded into another company must not be re-created.
+            # A row already folded into another company must not be re-created;
+            # its stories are still stored, against the surviving company.
             folded = merged_repo.keys_for(conn, name)
             fresh = [c for c in usable if c.source_key not in folded]
 
@@ -148,7 +164,16 @@ def sync(
             stories += _store_stories(conn, name, usable)
             reports.append(SourceReport(name, len(companies), len(usable), added, updated))
 
+        # Both sources are in; fold any company that appears in both.
         merged = merge_cross_source(conn)
         total = companies_repo.count(conn)
 
-    return SyncReport(reports, total, stories, merged)
+    # Outside the connection above: fetch_comments opens its own, and two write
+    # connections to one SQLite file would contend.
+    budget = settings.hn.comments_per_sync if comments is None else comments
+    threads = stored = 0
+    if budget:
+        report = fetch_comments(settings=settings, limit=budget)
+        threads, stored = report.threads, report.comments
+
+    return SyncReport(reports, total, stories, merged, threads, stored)

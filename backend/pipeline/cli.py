@@ -23,6 +23,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
     report = sync(
         batches=tuple(args.batch) if args.batch else None,
         limit=args.limit,
+        comments=args.comments,
     )
     print(report.render())
     return 0
@@ -50,10 +51,10 @@ def cmd_enrich(args: argparse.Namespace) -> int:
     return 0
 
 
-
 def cmd_comments(args: argparse.Namespace) -> int:
     print(fetch_comments(limit=args.limit).render())
     return 0
+
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -69,6 +70,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_sync = sub.add_parser("sync", parents=[common], help="pull sources into the database")
     p_sync.add_argument("--batch", action="append", help="YC batch, repeatable (e.g. W25)")
     p_sync.add_argument("--limit", type=int, help="cap companies per source (for testing)")
+    p_sync.add_argument("--comments", type=int,
+                        help="HN threads to pull at the end; 0 to skip")
     p_sync.set_defaults(func=cmd_sync)
 
     p_search = sub.add_parser("search", parents=[common], help="keyword search the database")

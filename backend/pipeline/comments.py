@@ -5,7 +5,8 @@ are written on one thread, because a SQLite connection is not safe to share.
 Highest-scoring threads go first — those are the ones a shortlist is likely to
 contain.
 
-Its own command: one request per thread, 518 on a first backfill.
+Called at the end of sync() with a per-run ceiling, and available on its own as
+`pipeline comments` for a bigger backfill.
 """
 from __future__ import annotations
 
