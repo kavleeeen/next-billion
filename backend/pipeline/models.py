@@ -70,3 +70,38 @@ class HNStory:
             "raw_json": json.dumps(self.raw, ensure_ascii=False),
         }
 
+
+@dataclass(frozen=True, slots=True)
+class Founder:
+    """One person named as a founder of one company."""
+
+    company_id: int
+    linkedin_slug: str
+    source_url: str                  # the page that named them; every claim cites this
+    discovered_via: str = "yc_page"  # 'yc_page' (authoritative) | 'pdl_search' (inferred)
+    name: str | None = None
+    pdl_matched: bool = False
+    current_title: str | None = None
+    current_company: str | None = None
+    prior_roles: list[dict[str, Any]] = field(default_factory=list)
+    raw: dict[str, Any] = field(default_factory=dict, repr=False)
+
+    @property
+    def display_name(self) -> str:
+        """PDL name when matched, otherwise the slug made readable."""
+        return self.name or self.linkedin_slug.replace("-", " ").title()
+
+    def to_row(self) -> dict[str, Any]:
+        """Column values for repository.founders.upsert()."""
+        return {
+            "company_id": self.company_id,
+            "linkedin_slug": self.linkedin_slug,
+            "name": self.display_name,
+            "source_url": self.source_url,
+            "discovered_via": self.discovered_via,
+            "pdl_matched": int(self.pdl_matched),
+            "current_title": self.current_title,
+            "current_company": self.current_company,
+            "prior_roles_json": json.dumps(self.prior_roles, ensure_ascii=False),
+            "raw_json": json.dumps(self.raw, ensure_ascii=False),
+        }

@@ -29,6 +29,24 @@ CREATE TABLE IF NOT EXISTS analyses (
 
 CREATE INDEX IF NOT EXISTS idx_analyses_company ON analyses (company_id);
 
+CREATE TABLE IF NOT EXISTS founders (
+    id              INTEGER PRIMARY KEY,
+    company_id      INTEGER NOT NULL REFERENCES companies (id) ON DELETE CASCADE,
+    linkedin_slug   TEXT    NOT NULL,      -- from the YC page; LinkedIn is never fetched
+    name            TEXT,                  -- from PDL when matched, else derived
+    source_url      TEXT    NOT NULL,      -- the page that named this person
+    discovered_via  TEXT    NOT NULL,      -- 'yc_page' | 'pdl_search'
+    pdl_matched     INTEGER NOT NULL DEFAULT 0,
+    current_title   TEXT,
+    current_company TEXT,
+    prior_roles_json TEXT,                 -- [{title, company, start, end}], newest first
+    raw_json        TEXT,                  -- full PDL record; also the credit cache
+    created_at      TEXT    NOT NULL,
+    updated_at      TEXT    NOT NULL,
+    UNIQUE (company_id, linkedin_slug)
+);
+
+CREATE INDEX IF NOT EXISTS idx_founders_company ON founders (company_id);
 
 -- A Hacker News post is an event, not a company. One company can launch several
 -- times: rowboat has three stories over eleven months, and its real traction is

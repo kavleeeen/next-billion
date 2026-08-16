@@ -32,7 +32,8 @@ SELECT c.*,
        COALESCE(t.story_count, 0)  AS story_count,
        COALESCE(t.points, 0)       AS points,
        COALESCE(t.comments, 0)     AS comments,
-       t.last_posted_at
+       t.last_posted_at,
+       (SELECT COUNT(*) FROM founders f WHERE f.company_id = c.id) AS founder_count
 FROM companies c
 LEFT JOIN company_traction t ON t.company_id = c.id
 WHERE (c.name        LIKE :pattern ESCAPE '\'
@@ -101,6 +102,15 @@ def search(
         "sort": sort,
     }).fetchall()
 
+
+def by_ids(conn: sqlite3.Connection, ids: list[int]) -> list[sqlite3.Row]:
+    """Companies for an explicit id list. Used by on-demand enrichment."""
+    if not ids:
+        return []
+    marks = ",".join("?" * len(ids))
+    return conn.execute(
+        f"SELECT * FROM companies WHERE id IN ({marks})", ids
+    ).fetchall()
 
 
 def count(conn: sqlite3.Connection) -> int:

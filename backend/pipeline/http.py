@@ -55,3 +55,20 @@ def get_json(
         delay *= 2
 
     raise FetchError(url)  # unreachable; keeps type checkers happy
+
+
+def get_text(url: str, *, headers: dict[str, str] | None = None,
+             timeout: float | None = None) -> str:
+    """GET a URL and return the body as text. Used for HTML pages.
+
+    Returns "" on any failure: a missing company page is a normal outcome,
+    not an error worth aborting a run for.
+    """
+    timeout = default_settings.http_timeout if timeout is None else timeout
+    request = urllib.request.Request(url, headers={**_HEADERS, **(headers or {})})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return response.read().decode("utf-8", "replace")
+    except Exception as exc:  # noqa: BLE001 - deliberately broad, see docstring
+        log.warning("%s -> %s", url, exc)
+        return ""

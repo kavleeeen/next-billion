@@ -5,6 +5,8 @@ import argparse
 import logging
 import sys
 
+from .enrich import enrich
+from .enrich.pdl import MissingToken
 from .search import DEFAULT_LIMIT, search
 from .sync import sync
 
@@ -34,6 +36,20 @@ def cmd_search(args: argparse.Namespace) -> int:
     return 0 if report.found else 1
 
 
+def cmd_enrich(args: argparse.Namespace) -> int:
+    try:
+        report = enrich(
+            limit=args.limit, use_pdl=not args.no_pdl,
+            source=args.source, force=args.force,
+        )
+    except MissingToken as exc:
+        print(exc)
+        return 1
+    print(report.render())
+    return 0
+
+
+
 def build_parser() -> argparse.ArgumentParser:
     # Shared flags, accepted either before or after the subcommand.
     common = argparse.ArgumentParser(add_help=False)
@@ -59,6 +75,18 @@ def build_parser() -> argparse.ArgumentParser:
                           help="default: batch; points: most HN traction; "
                                "recent: latest launch")
     p_search.set_defaults(func=cmd_search)
+
+    p_enrich = sub.add_parser("enrich", parents=[common],
+                              help="attach founders to companies (uses PDL credits)")
+    p_enrich.add_argument("--limit", type=int, default=5,
+                          help="companies to process; ~2 credits each (default 5)")
+    p_enrich.add_argument("--source", choices=("yc", "hn"),
+                          help="only enrich companies from this connector")
+    p_enrich.add_argument("--force", action="store_true",
+                          help="re-buy founders for companies that already have them")
+    p_enrich.add_argument("--no-pdl", action="store_true",
+                          help="scrape founder slugs only, spend no credits")
+    p_enrich.set_defaults(func=cmd_enrich)
 
     return parser
 
