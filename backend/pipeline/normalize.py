@@ -2,6 +2,29 @@
 from __future__ import annotations
 
 import re
+from urllib.parse import urlparse
+
+# Suffixes needing three labels rather than two.
+_MULTI_LABEL_TLDS = {"co.uk", "com.au", "co.in", "com.br", "co.jp", "co.nz"}
+
+
+def registrable_domain(url: str | None) -> str | None:
+    """`example.com` from `https://sub.example.com/path`.
+
+    No opinion about whose domain it is. `enrich._domain` adds that judgment;
+    the GitHub matcher needs the plain answer, because it compares a
+    repository's homepage with a company's website.
+    """
+    if not url:
+        return None
+    host = urlparse(url if "//" in url else f"//{url}").netloc.strip().lower().split(":")[0]
+    if "." not in host:
+        return None
+    labels = host.split(".")
+    if len(labels) >= 3 and ".".join(labels[-2:]) in _MULTI_LABEL_TLDS:
+        return ".".join(labels[-3:])
+    return ".".join(labels[-2:])
+
 
 _HN_PREFIX = re.compile(r"^\s*(launch|show)\s+hn\s*:\s*", re.I)
 # Batch codes are not only W/S/F. Real data contains P26, X25 too.

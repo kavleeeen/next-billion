@@ -28,11 +28,11 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from urllib.parse import urlparse
 
 from ..config import Settings, settings as default_settings
 from ..db import connect
 from ..models import Founder
+from ..normalize import registrable_domain
 from ..repository import companies as companies_repo
 from ..repository import founders as founders_repo
 from ..repository import pdl_usage as usage_repo
@@ -44,8 +44,23 @@ log = logging.getLogger(__name__)
 # are stored — a company with eight founders gets eight rows.
 SEARCH_PAGE_SIZE = 10
 
-# Suffixes needing three labels rather than two.
-_MULTI_LABEL_TLDS = {"co.uk", "com.au", "co.in", "com.br", "co.jp", "co.nz"}
+# Hosts that belong to a platform, not to the company linking from them. A
+# search keyed on one returns the platform's staff: github.com gave Airweave
+# ten "founders" who work at GitHub, and cost ten credits to do it. 289 of the
+# 1171 companies with a website point at github.com alone.
+# See docs/decisions/0007-shared-hosts-are-not-company-domains.md.
+_SHARED_HOSTS = frozenset({
+    "github.com", "github.io", "gitlab.com", "bitbucket.org", "sourceforge.net",
+    "npmjs.com", "pypi.org", "crates.io", "hex.pm", "rubygems.org",
+    "vercel.app", "netlify.app", "herokuapp.com", "fly.dev", "render.com",
+    "pages.dev", "firebaseapp.com", "web.app", "replit.app", "streamlit.app",
+    "notion.site", "notion.so", "gitbook.io", "readthedocs.io", "substack.com",
+    "medium.com", "wordpress.com", "webflow.io", "framer.website", "carrd.co",
+    "google.com", "docs.google.com", "apple.com", "apps.apple.com",
+    "play.google.com", "huggingface.co", "producthunt.com", "ycombinator.com",
+    "x.com", "twitter.com", "linkedin.com", "youtube.com", "reddit.com",
+    "discord.com", "discord.gg", "t.me", "telegram.me", "typeform.com",
+})
 
 
 @dataclass(frozen=True)
@@ -95,18 +110,13 @@ def _domain(url: str | None) -> str | None:
 
     Subdomains must be stripped. A Launch HN post may link to
     `app.propolis.tech`, while PDL stores `propolis.tech`.
+
+    Returns None for a shared host. No domain means no search, so the company
+    keeps no founders and rule 4 holds its verdict at Watch — which is correct,
+    because nobody has identified its team.
     """
-    if not url:
-        return None
-    host = urlparse(url if "//" in url else f"//{url}").netloc.lower().split(":")[0]
-    if not host:
-        return None
-    labels = host.split(".")
-    if len(labels) < 2:
-        return host
-    if len(labels) >= 3 and ".".join(labels[-2:]) in _MULTI_LABEL_TLDS:
-        return ".".join(labels[-3:])
-    return ".".join(labels[-2:])
+    domain = registrable_domain(url)
+    return None if domain in _SHARED_HOSTS else domain
 
 
 def _from_slug(company_id: int, slug: str, source_url: str, person: dict | None) -> Founder:
