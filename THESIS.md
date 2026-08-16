@@ -37,31 +37,59 @@ total. The model never returns a total.
 
 | # | Metric | Weight |
 |---|---|---|
-| 1 | Founder–market fit | 30% |
+| 1 | Founder signal | 30% |
 | 2 | Traction evidence | 25% |
 | 3 | Thesis fit | 20% |
 | 4 | Why now | 15% |
 | 5 | Defensibility | 10% |
 
-### 1. Founder–market fit — 30%
+### 1. Founder signal — 30%
 
 | Score | Anchor |
 |---|---|
-| 0–20 | No named founders, or no relevant background |
-| 21–50 | Strong generalists. Adjacent domain. First time on this problem. |
-| 51–79 | Built a version of this internally, at a company that needed it |
+| 0–20 | No founders named anywhere public |
+| 21–50 | Founders named. No prior role in this domain, and no public technical record. |
+| 51–79 | Either: built a version of this internally at a company that needed it — or has a public technical record in this domain: repositories, contributions, a launch thread explaining the problem in their own words |
 | 80–100 | Owned this system at scale, or exited in this category |
 
 This weight is the highest. At seed, the team is the only input that does not change.
+
+**Two kinds of evidence, ranked.** Career history is the better evidence and is
+read first. A public technical record is the substitute when career history is
+unavailable.
+
+| Tier | Evidence | Source | Reaches |
+|---|---|---|---|
+| Primary | Prior titles, employers and dates | People Data Labs, keyed on the LinkedIn URL published on the YC company page | up to 100 |
+| Fallback | Repositories, contributions, a founder's own account of prior work in a launch thread | GitHub, Hacker News, the company team page | **up to 79** |
+
+**The fallback cannot reach 80.** The top band asserts that a founder ran this
+system at scale, and a GitHub profile does not establish that. A company scored
+on the fallback alone is capped at 79, and the memo says which tier was used.
 
 ### 2. Traction evidence — 25%
 
 | Score | Anchor |
 |---|---|
-| 0–20 | Landing page and waitlist only |
-| 21–50 | A launch happened. Low engagement. The repo is quiet. |
-| 51–79 | Regular commits, real launch discussion, named users |
-| 80–100 | Several independent signals agree |
+| 0–20 | Landing page or waitlist only. No launch, no named users, no usage number. |
+| 21–50 | A launch happened. Engagement was thin. One weak signal only. |
+| 51–79 | One strong signal: an active repository, real launch discussion, named customers, or measurable package usage |
+| 80–100 | Two or more independent signals agree |
+
+**Accepted evidence, any of:** Hacker News launch points and comment count;
+npm or PyPI monthly downloads; repository commit activity and contributor
+count; named customers on the company site; team size and its growth; open
+engineering roles.
+
+**No public repository is not a penalty.** Closed source is a business choice,
+not a traction signal. Score the company on whatever evidence does exist.
+
+This rule came from a control case. Emergent is a Y Combinator company that is
+doing well, and its public GitHub organisation holds four repositories: two
+forks, a small chat client, and a Telegram bot, none above two stars. Under
+anchors written in terms of commits and repositories it would have scored near
+zero on a quarter of the total. A missing repository means the instrument does
+not apply, not that traction is absent.
 
 ### 3. Thesis fit — 20%
 
@@ -105,25 +133,50 @@ retrofitted. We prefer to pay for founders.
 
 The rules run in this order. Each rule can only lower a result.
 
-**Rule 3 runs first, on each metric.**
+**First, on each metric:**
 
-3. **Uncited score.** A metric with an empty evidence list takes a maximum
-   score of 50 for that metric. The limit applies to the metric only. It does
-   not limit the total directly. The reduced metric score then enters the
-   weighted sum. The memo names each limited metric.
+**Rule 3 — Uncited score.** A metric with an empty evidence list takes a
+maximum score of 50 for that metric. The limit applies to the metric only. It
+does not limit the total directly. The reduced metric score then enters the
+weighted sum. The memo names each limited metric.
 
-**Rules 1 and 2 run second, on the result.**
+**Then, on the result:**
 
-1. **Traction floor.** A traction score below 25 limits the *total* to 60.
-2. **Thesis gate.** A thesis fit below 40 forces the *verdict* to Pass. The
-   total keeps its value. The memo shows both.
+**Rule 1 — Traction floor.** A traction score below 25 limits the *total* to 60.
+
+**Rule 2 — Thesis gate.** A thesis fit below 40 forces the *verdict* to Pass.
+The total keeps its value. The memo shows both.
+
+**Rule 4 — No founder evidence.** A company with no founder record cannot
+exceed **Watch**, whatever the total. The memo names the reason.
+
+Rule 4 exists because founder data is the one input that costs money to obtain,
+so it is fetched on demand rather than for every company. Without it, metric 1
+is uncited and rule 3 caps it at 50 — which still leaves a company able to reach
+70 on the other four metrics alone:
+
+| Metric | Score | Weight | Contribution |
+|---|---|---|---|
+| Founder signal | 50 (capped, uncited) | 30% | 15.0 |
+| Traction evidence | 79 | 25% | 19.8 |
+| Thesis fit | 100 | 20% | 20.0 |
+| Why now | 100 | 15% | 15.0 |
+| Defensibility | 100 | 10% | 10.0 |
+
+Total 79.8, which would otherwise read **Take a meeting** for a company whose
+founders we never looked at. Rule 4 holds it at Watch until someone does.
+
+This makes scoring a two-pass process on purpose:
+
+| Pass | Runs on | Reads | Produces |
+|---|---|---|---|
+| Cheap | every company | metrics 3, 4, 5 and the free part of 2 | a ranking, to pick a shortlist |
+| Full | the shortlist only | everything, after founder enrichment | a verdict and a memo |
 
 ## Blind spots
 
 These are stated so a reader interprets the scores correctly.
 
-- **Bias toward legible founders.** A public GitHub profile is a proxy for
-  competence, not competence. Strong founders with a small public record score low.
 - **Bias toward launched companies.** A stealth company scores near zero on
   traction. It cannot clear the floor. This is a real cost of the thesis.
 - **No market score.** Market size at seed is mostly fiction. Market appears

@@ -14,5 +14,9 @@ venv/
 data/*.db
 data/*.db-journal
 
+# Local-only web viewer. Not part of the deliverable; used to eyeball the data
+# while building. The pipeline runs entirely from the CLI.
+frontend/index.html
+
 # macOS
 .DS_Store
