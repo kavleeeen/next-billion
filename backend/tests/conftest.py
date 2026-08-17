@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from pipeline.config import HNSettings, Settings
+from pipeline.sources.coverage import Coverage
 from pipeline.db import connect
 
 # Trimmed copies of real API responses, so parsing is tested against the
@@ -95,22 +96,26 @@ def conn(settings: Settings):
 def stub_sources(monkeypatch):
     """Replace both fetchers with the fixture payloads, so no test hits the network.
 
-    Returns the list of source names that were called, in order.
+    Returns the list of source names that were called, in order. The topic is
+    accepted and ignored: the payloads are fixed, so a test asserting on the
+    topic would be asserting on the stub.
     """
     from pipeline import sync as sync_module
     from pipeline.sources import hackernews, yc
 
     calls: list[str] = []
 
-    def fake_yc(batches, limit=None, **kwargs):
+    def fake_yc(topic, batches, limit=None, **kwargs):
         calls.append("yc")
         companies = yc.parse([YC_PAYLOAD])
-        return companies[:limit] if limit else companies
+        companies = companies[:limit] if limit else companies
+        return companies, Coverage.whole(len(companies))
 
-    def fake_hn(min_points, since, limit=None, **kwargs):
+    def fake_hn(topic, since, limit=None, **kwargs):
         calls.append("hn")
         companies = hackernews.parse([HN_PAYLOAD])
-        return companies[:limit] if limit else companies
+        companies = companies[:limit] if limit else companies
+        return companies, Coverage.whole(len(companies))
 
     monkeypatch.setattr(sync_module.yc, "fetch", fake_yc)
     monkeypatch.setattr(sync_module.hackernews, "fetch", fake_hn)

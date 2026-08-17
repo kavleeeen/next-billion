@@ -67,8 +67,3 @@ def repeat_launchers(conn: sqlite3.Connection, limit: int = 10) -> list[sqlite3.
 
 def count(conn: sqlite3.Connection) -> int:
     return conn.execute(COUNT).fetchone()[0]
-
-
-def newest_posted_at(conn: sqlite3.Connection) -> str | None:
-    """Date of the most recent story held. The floor for the next fetch."""
-    return conn.execute(NEWEST).fetchone()["newest"]

@@ -1,12 +1,12 @@
 """Hacker News via the Algolia search API. No key needed.
 
-Two pools, used for different jobs:
-    Launch HN - low volume, high precision. Every post is a funded company.
-    Show HN   - high volume, low precision. Catches non-YC and unfunded companies.
+Two pools, treated differently because their sizes differ by 3,500x:
 
-No topic filter. Four keyword searches returned 509 stories where an unfiltered
-Show HN search returns 1,820 — an editorial guess made at fetch time and
-invisible afterwards. The thesis gate decides that later, by a stated rule.
+    Launch HN  119 a year. Taken whole; the thesis gate decides relevance.
+    Show HN    418,048 a year. Bounded by the partner's topic.
+
+Show HN has no points filter. See
+docs/decisions/0015-the-topic-decides-what-we-collect.md.
 """
 from __future__ import annotations
 
@@ -19,6 +19,8 @@ from datetime import datetime, timezone
 from typing import Any
 
 from ..http import get_json
+from ..pacing import Pacer
+from .coverage import Coverage
 from ..models import Company, HNStory
 from ..normalize import parse_hn_title
 
@@ -27,7 +29,12 @@ log = logging.getLogger(__name__)
 NAME = "hn"
 BASE_URL = "https://hn.algolia.com/api/v1/search"
 PAGE_SIZE = 100
-MAX_PAGES = 10
+MAX_PAGES = 10          # Algolia refuses page*hitsPerPage above 1000 anyway
+
+# No key is asked for, so we do not hammer it. One pacer for the module: the
+# limit belongs to the address, not to a worker. See docs/decisions/0008.
+REQUESTS_PER_MINUTE = 300
+PACER = Pacer()
 
 # Fields that only some posts carry. The highest-scoring post wins the name and
 # one-liner, but these are merged across every post so a later, bigger launch
@@ -132,16 +139,22 @@ def parse(payloads: list[dict[str, Any]]) -> list[Company]:
     ]
 
 
-def _search(params: dict[str, str], limit: int | None) -> list[dict[str, Any]]:
-    """Every page for one query. Sequential: the page count is only known after
-    the first response."""
+def _search(
+    params: dict[str, str], limit: int | None
+) -> tuple[list[dict[str, Any]], Coverage]:
+    """Every page for one query, and how much of the match we reached.
+
+    Sequential: the page count is only known after the first response.
+    """
     payloads: list[dict[str, Any]] = []
-    collected = 0
+    collected = available = 0
 
     for page in range(MAX_PAGES):
         query = urllib.parse.urlencode({**params, "page": page, "hitsPerPage": PAGE_SIZE})
+        PACER.wait(REQUESTS_PER_MINUTE)
         payload = get_json(f"{BASE_URL}?{query}")
         hits = payload.get("hits") or []
+        available = payload.get("nbHits") or available
         if not hits:
             break
 
@@ -150,46 +163,54 @@ def _search(params: dict[str, str], limit: int | None) -> list[dict[str, Any]]:
         if (limit and collected >= limit) or page + 1 >= (payload.get("nbPages") or 1):
             break
 
-    return payloads
+    return payloads, Coverage(read=collected, available=available)
 
 
-def since_epoch(newest_stored: str | None, lookback_days: int, refresh_days: int) -> int:
+def since_epoch(lookback_days: int) -> int:
     """The `created_at_i` floor for this run.
 
-    Starts before the newest story held, not at it: points keep rising after a
-    post appears, so a strictly-newer floor would freeze traction.
+    Always the full window. An earlier version started from the newest story
+    held, which was cheap for one repeated broad sync but wrong here: each
+    topic is a new question, and a floor set by the last topic hides every
+    older post that answers this one.
     """
-    if not newest_stored:
-        return int(time.time()) - lookback_days * 86_400
-    try:
-        seen = datetime.fromisoformat(newest_stored).replace(tzinfo=timezone.utc)
-    except ValueError:
-        return int(time.time()) - lookback_days * 86_400
-    return int(seen.timestamp()) - refresh_days * 86_400
+    return int(time.time()) - lookback_days * 86_400
 
 
 def fetch(
-    min_points: int,
+    topic: str,
     since: int,
     limit: int | None = None,
     workers: int = 8,
-) -> list[Company]:
+) -> tuple[list[Company], Coverage]:
     """Both searches, from `since` onward. Called by sync().
 
     Independent, so they run concurrently; parse() deduplicates the overlap.
+    The topic bounds Show HN only: Launch HN is 119 posts a year, and asking a
+    topic of it returns 8, which throws away companies for no gain.
     """
+    if not topic.strip():
+        raise ValueError("sync needs a topic; it decides what we collect")
+
     searches: list[dict[str, str]] = [
         {"query": '"Launch HN"', "tags": "story",
          "numericFilters": f"created_at_i>{since}"},
-        {"tags": "show_hn",
-         "numericFilters": f"points>{min_points},created_at_i>{since}"},
+        {"query": topic, "tags": "show_hn",
+         "numericFilters": f"created_at_i>{since}"},
     ]
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        pages = list(pool.map(lambda p: _search(p, limit), searches))
+        results = list(pool.map(lambda p: _search(p, limit), searches))
 
-    payloads = [payload for group in pages for payload in group]
-    log.info("hn: %s searches, %s pages, since %s", len(searches), len(payloads), since)
+    payloads = [payload for group, _ in results for payload in group]
+    coverage = Coverage(
+        read=sum(c.read for _, c in results),
+        available=sum(c.available for _, c in results),
+    )
+    log.info("hn: topic %r, %s pages, %s of %s matches, since %s",
+             topic, len(payloads), coverage.read, coverage.available, since)
+    if coverage.truncated:
+        log.warning("%s", coverage.describe("hn"))
 
     companies = parse(payloads)
-    return companies[:limit] if limit else companies
+    return (companies[:limit] if limit else companies), coverage

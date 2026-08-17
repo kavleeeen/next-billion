@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable
 
 from .config import Settings, settings as default_settings
@@ -20,6 +20,7 @@ from .models import Company
 from .repository import companies as companies_repo
 from .repository import hn_stories as stories_repo
 from .repository import merged_rows as merged_repo
+from .sources.coverage import Coverage
 from .sources import hackernews, yc
 
 log = logging.getLogger(__name__)
@@ -32,6 +33,7 @@ class SourceReport:
     usable: int
     added: int
     updated: int
+    coverage: Coverage = field(default_factory=lambda: Coverage.whole(0))
 
     @property
     def rejected(self) -> int:
@@ -65,6 +67,12 @@ class SyncReport:
     total_stories: int = 0
     merged: int = 0
 
+    @property
+    def truncated(self) -> list[str]:
+        """Sources that had more to give than we read."""
+        return [line for r in self.sources
+                if (line := r.coverage.describe(r.source))]
+
     def render(self) -> str:
         """Human-readable table. Called by cli.cmd_sync."""
         lines = [
@@ -78,6 +86,9 @@ class SyncReport:
                 f"{report.rejected:>10}{report.added:>7}{report.updated:>9}"
             )
         lines.append("-" * 51)
+        # A silent cut is the defect 0015 removed from the points filter, so a
+        # cut made by a page cap has to be stated too.
+        lines.extend(self.truncated)
         lines.append(f"companies in database: {self.total_rows}")
         if self.total_stories:
             lines.append(f"hn stories written   : {self.total_stories}")
@@ -87,7 +98,8 @@ class SyncReport:
 
 
 def _plan(
-    settings: Settings, batches: tuple[str, ...], limit: int | None, hn_since: int
+    settings: Settings, topic: str, batches: tuple[str, ...],
+    limit: int | None, hn_since: int,
 ) -> list[tuple[str, Callable[[], list[Company]]]]:
     """Pair each source name with a zero-argument call that fetches it.
 
@@ -95,20 +107,19 @@ def _plan(
     refers to a specific source.
     """
     return [
-        (yc.NAME, lambda: yc.fetch(batches, limit, workers=settings.fetch_workers)),
+        (yc.NAME,
+         lambda: yc.fetch(topic, batches, limit, workers=settings.fetch_workers)),
         (
             hackernews.NAME,
             lambda: hackernews.fetch(
-                settings.hn.min_points,
-                hn_since,
-                limit,
-                workers=settings.fetch_workers,
+                topic, hn_since, limit, workers=settings.fetch_workers,
             ),
         ),
     ]
 
 
 def sync(
+    topic: str,
     *,
     settings: Settings = default_settings,
     batches: tuple[str, ...] | None = None,
@@ -116,28 +127,30 @@ def sync(
 ) -> SyncReport:
     """Fetch every source and upsert into the database. Safe to re-run.
 
+    `topic` is required. It is what a partner is looking for, and it decides
+    what we collect rather than what we keep. See
+    docs/decisions/0015-the-topic-decides-what-we-collect.md.
     """
+    if not topic.strip():
+        raise ValueError("sync needs a topic; it decides what we collect")
     settings.ensure_dirs()
-    batches = batches or settings.yc.batches
+    # No batches means the whole YC directory. The topic is the filter now, so
+    # pinning three recent batches would only fight it.
+    batches = batches or ()
     reports: list[SourceReport] = []
     stories = 0
 
-    # Incremental: the floor comes from the newest story held, so a nightly run
-    # reads a handful of posts rather than a year of them.
-    with connect(settings.db_path) as conn:
-        newest = stories_repo.newest_posted_at(conn)
-    hn_since = hackernews.since_epoch(
-        newest, settings.hn.lookback_days, settings.hn.refresh_days
-    )
+    hn_since = hackernews.since_epoch(settings.hn.lookback_days)
 
     # The sources are independent, so fetch them at the same time. Writing stays
     # on this thread: a SQLite connection is not safe to share.
-    plan = _plan(settings, batches, limit, hn_since)
+    plan = _plan(settings, topic, batches, limit, hn_since)
     with ThreadPoolExecutor(max_workers=len(plan)) as pool:
-        fetched = list(pool.map(lambda item: (item[0], item[1]()), plan))
+        fetched = [(name, *call()) for name, call in
+                   pool.map(lambda item: (item[0], item[1]), plan)]
 
     with connect(settings.db_path) as conn:
-        for name, companies in fetched:
+        for name, companies, coverage in fetched:
             usable = [company for company in companies if company.is_usable]
             if rejected := len(companies) - len(usable):
                 log.info("%s: rejected %s records with a non-company name", name, rejected)
@@ -149,7 +162,8 @@ def sync(
 
             added, updated = companies_repo.upsert(conn, fresh)
             stories += _store_stories(conn, name, usable)
-            reports.append(SourceReport(name, len(companies), len(usable), added, updated))
+            reports.append(SourceReport(name, len(companies), len(usable),
+                                        added, updated, coverage))
 
         # Both sources are in; fold any company that appears in both.
         merged = merge_cross_source(conn)

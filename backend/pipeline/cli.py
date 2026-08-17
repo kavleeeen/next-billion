@@ -23,10 +23,15 @@ def _configure_logging(verbose: bool) -> None:
 
 
 def cmd_sync(args: argparse.Namespace) -> int:
-    report = sync(
-        batches=tuple(args.batch) if args.batch else None,
-        limit=args.limit,
-    )
+    try:
+        report = sync(
+            args.topic,
+            batches=tuple(args.batch) if args.batch else None,
+            limit=args.limit,
+        )
+    except ValueError as exc:
+        print(exc)
+        return 1
     print(report.render())
     return 0
 
@@ -91,7 +96,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_sync = sub.add_parser("sync", parents=[common], help="pull sources into the database")
+    p_sync = sub.add_parser("sync", parents=[common],
+                            help="collect companies for a topic")
+    p_sync.add_argument("topic", help='what to look for, e.g. "AI agents for SMBs"')
     p_sync.add_argument("--batch", action="append", help="YC batch, repeatable (e.g. W25)")
     p_sync.add_argument("--limit", type=int, help="cap companies per source (for testing)")
     p_sync.set_defaults(func=cmd_sync)

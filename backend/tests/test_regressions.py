@@ -1,6 +1,8 @@
 """One test per defect found in review. Each fails if the defect returns."""
 import pytest
 
+TOPIC = "AI agents for SMBs"
+
 from pipeline.db import connect
 from pipeline.models import Company
 from pipeline.normalize import looks_like_company_name, parse_hn_title
@@ -33,7 +35,7 @@ class TestParseDedupe:
 
     def test_sync_stores_each_story_once(self, settings, stub_sources):
         """parse() is the only path into the database, so dedupe always applies."""
-        report = sync(settings=settings)
+        report = sync(TOPIC, settings=settings)
         assert report.total_rows == 4          # Browser Use appears in both sources
         assert all(r.fetched == r.usable for r in report.sources)
 
@@ -289,7 +291,7 @@ class TestCrossSourceMerge:
     def test_a_company_in_both_sources_becomes_one_row(self, settings, stub_sources):
         from pipeline.db import connect
 
-        report = sync(settings=settings)
+        report = sync(TOPIC, settings=settings)
         assert report.merged == 1
 
         with connect(settings.db_path) as conn:
@@ -300,7 +302,7 @@ class TestCrossSourceMerge:
         from pipeline.db import connect
         from pipeline.repository import hn_stories as stories_repo
 
-        sync(settings=settings)
+        sync(TOPIC, settings=settings)
         with connect(settings.db_path) as conn:
             row = conn.execute(
                 "SELECT * FROM companies WHERE name = 'Browser Use'"
@@ -435,12 +437,12 @@ class TestMergeIsRecorded:
         from pipeline.db import connect
         from pipeline.repository import merged_rows as merged_repo
 
-        sync(settings=settings)
+        sync(TOPIC, settings=settings)
         with connect(settings.db_path) as conn:
             assert merged_repo.count(conn) == 1
             assert merged_repo.keys_for(conn, "hn") == {"browser use"}
 
-        second = sync(settings=settings)
+        second = sync(TOPIC, settings=settings)
         assert second.merged == 0
         assert sum(r.added for r in second.sources) == 0
 
@@ -450,8 +452,8 @@ class TestMergeIsRecorded:
         from pipeline.db import connect
         from pipeline.repository import hn_stories as stories_repo
 
-        sync(settings=settings)
-        sync(settings=settings)          # second run: the row is suppressed
+        sync(TOPIC, settings=settings)
+        sync(TOPIC, settings=settings)          # second run: the row is suppressed
 
         with connect(settings.db_path) as conn:
             row = conn.execute(
@@ -512,7 +514,7 @@ class TestPrepare:
             hn_comments, "fetch_many",
             lambda *a, **k: (_ for _ in ()).throw(AssertionError("sync fetched threads")),
         )
-        report = sync(settings=settings)
+        report = sync(TOPIC, settings=settings)
         assert not hasattr(report, "threads_pulled")
 
 

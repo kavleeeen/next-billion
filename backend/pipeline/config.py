@@ -34,14 +34,13 @@ load_dotenv()
 
 @dataclass(frozen=True)
 class YCSettings:
-    batches: tuple[str, ...] = ("W25", "S25", "W26")
+    """The topic filters the directory now, so there is no default batch list.
+    `sync --batch W25` still narrows, for the "a feed like YC W25" seed input."""
 
 
 @dataclass(frozen=True)
 class HNSettings:
-    min_points: int = 30
     lookback_days: int = 365   # first run only; later runs start from the newest story held
-    refresh_days: int = 7      # re-read this far back, so recent points stay current
 
     comment_workers: int = 8   # writes stay serial; a SQLite connection is not shareable
 

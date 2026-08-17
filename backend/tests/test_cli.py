@@ -12,7 +12,7 @@ from pipeline.prepare import MAX_SELECTION
 
 # Command, plus whatever positional arguments it requires.
 COMMANDS = (
-    ("sync", []),
+    ("sync", ["AI agents for SMBs"]),
     ("search", ["agents"]),
     ("enrich", []),
     ("comments", []),
