@@ -1,14 +1,14 @@
 """Stage 3: get a selected shortlist ready to score.
 
-A partner picks up to 20 companies. Before any of them can be scored, two
-things have to exist, and neither is useful without the other:
+A partner picks up to 20 companies. Before any of them can be scored, three
+kinds of evidence have to exist:
 
     launch threads   free      the founder's own words, for metrics 1 and 4
+    repositories     free      stars, contributors, recency, for metric 2
     founders         credits   prior roles, the primary evidence for metric 1
 
-Both are done here, in that order — threads first because they cost nothing, so
-a credit ceiling reached during enrichment still leaves the free evidence in
-place.
+All three are done here, in that order. The free work runs first, so a credit
+ceiling reached during enrichment still leaves every free signal in place.
 
 Sync deliberately does not pull threads. It could only cover 40 per run, 5% of
 companies, chosen by points rather than by what anyone asked for.
@@ -22,6 +22,7 @@ from .comments import fetch_comments
 from .config import Settings, settings as default_settings
 from .db import connect
 from .enrich import enrich
+from .repos import find_repos
 from .repository import companies as companies_repo
 
 log = logging.getLogger(__name__)
@@ -39,6 +40,8 @@ class PrepareReport:
     threads_pulled: int
     comments_stored: int
     founder_comments: int
+    repos_found: int
+    repos_absent: int
     founders_found: int
     credits_used: int             # this run only; the provider holds the total
 
@@ -48,6 +51,8 @@ class PrepareReport:
             f"threads pulled      : {self.threads_pulled}",
             f"comments stored     : {self.comments_stored} "
             f"({self.founder_comments} from founders)",
+            f"repositories found  : {self.repos_found} "
+            f"({self.repos_absent} with none public)",
             f"founders found      : {self.founders_found}",
             f"credits this run    : {self.credits_used}",
         ])
@@ -78,7 +83,10 @@ def prepare(
     if not known:
         raise ValueError("none of the selected ids exist")
 
+    # Free work first, so a credit ceiling reached during enrichment still
+    # leaves every free signal in place.
     threads = fetch_comments(settings=settings, company_ids=known)
+    repos = find_repos(known, settings=settings)
     founders = enrich(settings=settings, company_ids=known, use_pdl=use_pdl)
 
     return PrepareReport(
@@ -86,6 +94,8 @@ def prepare(
         threads_pulled=threads.threads,
         comments_stored=threads.comments,
         founder_comments=threads.from_submitter,
+        repos_found=repos.found,
+        repos_absent=repos.absent,
         founders_found=founders.founders_found,
         credits_used=founders.pdl_calls,
     )

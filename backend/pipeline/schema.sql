@@ -82,6 +82,35 @@ SELECT company_id,
 FROM hn_stories
 GROUP BY company_id;
 
+-- One public repository for each company, when there is one. Feeds metric 2
+-- and metric 1's fallback tier. `missing = 1` records that we looked and found
+-- nothing public, which THESIS.md treats as the instrument not applying rather
+-- than as weak traction.
+CREATE TABLE IF NOT EXISTS github_repos (
+    company_id    INTEGER PRIMARY KEY REFERENCES companies (id) ON DELETE CASCADE,
+    owner         TEXT    NOT NULL,
+    repo          TEXT,
+    full_name     TEXT,
+    found_via     TEXT    NOT NULL,     -- website | site_link | org_search
+    homepage      TEXT,                 -- the company's real address, per GitHub
+    description   TEXT,
+    language      TEXT,
+    stars         INTEGER NOT NULL DEFAULT 0,
+    forks         INTEGER NOT NULL DEFAULT 0,
+    open_issues   INTEGER NOT NULL DEFAULT 0,
+    contributors  INTEGER NOT NULL DEFAULT 0,
+    org_followers INTEGER NOT NULL DEFAULT 0,
+    is_fork       INTEGER NOT NULL DEFAULT 0,
+    archived      INTEGER NOT NULL DEFAULT 0,
+    gh_created_at TEXT,
+    pushed_at     TEXT,                 -- recency of work, the cheap commit signal
+    missing       INTEGER NOT NULL DEFAULT 0,
+    raw_json      TEXT,
+    checked_at    TEXT    NOT NULL,     -- the refresh window reads this
+    created_at    TEXT    NOT NULL,
+    updated_at    TEXT    NOT NULL
+);
+
 -- Founders answer questions in their own launch thread: where they worked, why
 -- now, who the users are. It is the only free source of a founder speaking for
 -- themselves, every line has a permalink, and it is what the LLM reads when

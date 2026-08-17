@@ -62,6 +62,24 @@ class PDLSettings:
 
 
 @dataclass(frozen=True)
+class GitHubSettings:
+    """Public API, no key required. A selection of 15 costs about 45 requests
+    and the anonymous limit is 60 an hour; a token raises it to 5000."""
+
+    token_env: str = "GITHUB_TOKEN"
+    base_url: str = "https://api.github.com"
+    timeout: float = 20.0
+    # Tier 3 costs two extra requests for each candidate. Turn it off to keep a
+    # run inside the anonymous limit when a selection is large.
+    search_orgs: bool = True
+
+    @property
+    def token(self) -> str | None:
+        """Optional. Absent means the anonymous limit applies."""
+        return os.environ.get(self.token_env)
+
+
+@dataclass(frozen=True)
 class Settings:
     db_path: Path = ROOT / "data" / "next-billion.db"
 
@@ -75,12 +93,11 @@ class Settings:
     # to free work only: PDL founders are never re-bought on a timer.
     refresh_after_hours: float = 1.0
 
-    # One block per source. GitHub is in docs/decisions/0001-sources.md as an
-    # accepted source but is not built yet, so it has no settings block here —
-    # config describes what the code does, not what it will do.
+    # One block per source.
     yc: YCSettings = field(default_factory=YCSettings)
     hn: HNSettings = field(default_factory=HNSettings)
     pdl: PDLSettings = field(default_factory=PDLSettings)
+    github: GitHubSettings = field(default_factory=GitHubSettings)
 
     def ensure_dirs(self) -> None:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
