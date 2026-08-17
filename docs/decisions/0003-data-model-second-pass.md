@@ -111,6 +111,11 @@ carrying titles, employers and dates.
 
 ## 3. Credits are data, not a constant
 
+> **Superseded in part by
+> [0008](0008-behaviour-at-a-providers-limit.md).** The `pdl_usage` table and
+> the two ceilings below were removed. The provider counts the allowance and
+> refuses with a 402, so a second count could only disagree with it.
+
 The People Data Labs free plan allows 100 lookups a month. That budget is
 shared by every process, so it cannot live in a variable.
 

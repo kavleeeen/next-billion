@@ -14,12 +14,10 @@ Two strategies, tried in that order:
 Feeds metric 1 of the thesis. Where PDL has no record the founder is still
 stored, and metric 1 falls back to its second tier, which caps at 79.
 
-Credits are the constraint. Four guards, all on by default:
-  * a company that already has founders is skipped unless force=True
-  * no run may exceed settings.pdl.max_calls_per_run
-  * no calendar month may exceed settings.pdl.monthly_credit_cap, counted in
-    the `pdl_usage` table so the ceiling survives across processes
-  * the token is checked once before any call, so a missing key costs nothing
+Credits are the constraint, and the provider counts them. We keep no tally of
+our own: a second count can only disagree with the authoritative one. A company
+that already has founders is skipped unless force=True, the token is checked
+before any call, and a 402 ends the run.
 
 Each company commits on its own. A failure part-way through keeps the founders
 already bought instead of rolling the whole run back.
@@ -35,7 +33,6 @@ from ..models import Founder
 from ..normalize import registrable_domain
 from ..repository import companies as companies_repo
 from ..repository import founders as founders_repo
-from ..repository import pdl_usage as usage_repo
 from . import pdl, yc_page
 
 log = logging.getLogger(__name__)
@@ -74,9 +71,7 @@ class EnrichReport:
     pdl_matched: int
     added: int
     updated: int
-    stopped: str | None          # None, 'run_cap' or 'monthly_cap'
-    spent_this_month: int
-    monthly_cap: int
+    stopped: str | None          # None, or 'account_exhausted'
     total_founders: int
     total_matched: int
 
@@ -92,12 +87,13 @@ class EnrichReport:
             f"with prior roles    : {self.pdl_matched}  ({rate})",
             f"rows added/updated  : {self.added}/{self.updated}",
         ]
-        if self.stopped == "run_cap":
-            lines.append("stopped early: hit pdl.max_calls_per_run")
-        elif self.stopped == "monthly_cap":
-            lines.append("stopped early: hit pdl.monthly_credit_cap")
+        if self.stopped == "account_exhausted":
+            lines.append(
+                "stopped early: the provider refused - the plan's monthly matches "
+                "are gone. Founders already stored are kept; companies without one "
+                "score metric 1 on the fallback tier, which cannot exceed 79."
+            )
         lines.append("-" * 46)
-        lines.append(f"credits used this month: {self.spent_this_month} of {self.monthly_cap}")
         lines.append(
             f"founders in database   : {self.total_founders} "
             f"({self.total_matched} with prior roles)"
@@ -168,7 +164,8 @@ def enrich(
 ) -> EnrichReport:
     """Find founders for companies that have none yet.
 
-    limit counts *companies*, not credits. Budget roughly 2 to 3 credits each.
+    limit counts *companies*, not credits. Budget roughly 2 to 3 credits each,
+    and stop when the provider says the allowance is finished.
     company_ids targets an explicit list, for on-demand enrichment from the UI.
     force re-buys founders for companies that already have them.
     use_pdl=False finds YC founders by name only and spends nothing.
@@ -186,27 +183,6 @@ def enrich(
     stopped: str | None = None
 
     with connect(settings.db_path) as conn:
-        month_start = usage_repo.spent_this_month(conn)
-
-        def may_spend(n: int = 1) -> bool:
-            """Both ceilings, checked before every call."""
-            nonlocal stopped
-            if calls + n > settings.pdl.max_calls_per_run:
-                stopped = "run_cap"
-                return False
-            if month_start + calls + n > settings.pdl.monthly_credit_cap:
-                stopped = "monthly_cap"
-                return False
-            return True
-
-        def spend(n: int) -> None:
-            """Record credits the moment they are consumed, then commit, so a
-            later failure cannot lose the record of money already spent."""
-            nonlocal calls
-            calls += n
-            usage_repo.record(conn, n)
-            conn.commit()
-
         companies = (
             companies_repo.by_ids(conn, company_ids) if company_ids
             else founders_repo.companies_needing_founders(conn, limit, source)
@@ -225,29 +201,35 @@ def enrich(
                 if company["source"] == "yc" else []
             )
 
-            if slugs:
-                via_yc += 1
-                source_url = yc_page.page_url(company["source_key"])
-                for slug in slugs:
-                    person = None
-                    if use_pdl and may_spend():
-                        person = pdl.enrich_person(slug, settings.pdl)
-                        spend(1)
-                    batch.append(_from_slug(company["id"], slug, source_url, person))
-                    matched += bool(person)
+            # No ceiling of our own. The provider knows what is left, and its
+            # refusal is the only signal that cannot be wrong.
+            try:
+                if slugs:
+                    via_yc += 1
+                    source_url = yc_page.page_url(company["source_key"])
+                    for slug in slugs:
+                        person = None
+                        if use_pdl:
+                            person = pdl.enrich_person(slug, settings.pdl)
+                            calls += 1
+                        batch.append(_from_slug(company["id"], slug, source_url, person))
+                        matched += bool(person)
 
-            elif use_pdl and (domain := _domain(company["website"])) and may_spend():
-                people = pdl.search_founders(
-                    domain, settings.pdl, size=SEARCH_PAGE_SIZE
-                )
-                spend(max(len(people), 1))   # a miss still costs a query
-                if people:
-                    via_search += 1
-                    matched += len(people)
-                    batch += [
-                        _from_search(company["id"], person, company["website"])
-                        for person in people
-                    ]
+                elif use_pdl and (domain := _domain(company["website"])):
+                    people = pdl.search_founders(
+                        domain, settings.pdl, size=SEARCH_PAGE_SIZE
+                    )
+                    calls += 1
+                    if people:
+                        via_search += 1
+                        matched += len(people)
+                        batch += [
+                            _from_search(company["id"], person, company["website"])
+                            for person in people
+                        ]
+            except pdl.AccountExhausted as exc:
+                log.warning("pdl account exhausted: %s", exc)
+                stopped = "account_exhausted"
 
             found += len(batch)
             company_added, company_updated = founders_repo.upsert(conn, batch)
@@ -255,9 +237,11 @@ def enrich(
             updated += company_updated
             conn.commit()   # keep what this company bought, whatever happens next
 
+            if stopped == "account_exhausted":
+                break
+
         total = founders_repo.count(conn)
         total_matched = founders_repo.count_matched(conn)
-        spent = usage_repo.spent_this_month(conn)
 
     return EnrichReport(
         companies=len(companies),
@@ -270,8 +254,6 @@ def enrich(
         added=added,
         updated=updated,
         stopped=stopped,
-        spent_this_month=spent,
-        monthly_cap=settings.pdl.monthly_credit_cap,
         total_founders=total,
         total_matched=total_matched,
     )

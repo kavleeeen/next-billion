@@ -48,16 +48,12 @@ class HNSettings:
 
 @dataclass(frozen=True)
 class PDLSettings:
-    """People Data Labs. The free plan allows 100 lookups a month, so every
-    response is stored on the founder row and never fetched twice."""
+    """People Data Labs. The provider counts the allowance and refuses with a
+    402 when it ends, so we keep no count of our own. Every response is stored
+    on the founder row and never fetched twice."""
 
     token_env: str = "PDL_API_KEY"
     base_url: str = "https://api.peopledatalabs.com/v5/person/enrich"
-    # Ceiling for one run, so a single mistake cannot drain the allowance.
-    max_calls_per_run: int = 25
-    # Ceiling across every run in a calendar month, tracked in `pdl_usage`.
-    # The free plan allows 100.
-    monthly_credit_cap: int = 100
 
     @property
     def token(self) -> str | None:

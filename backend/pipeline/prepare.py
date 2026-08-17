@@ -40,9 +40,7 @@ class PrepareReport:
     comments_stored: int
     founder_comments: int
     founders_found: int
-    credits_used: int
-    spent_this_month: int
-    monthly_cap: int
+    credits_used: int             # this run only; the provider holds the total
 
     def render(self) -> str:
         return "\n".join([
@@ -52,8 +50,6 @@ class PrepareReport:
             f"({self.founder_comments} from founders)",
             f"founders found      : {self.founders_found}",
             f"credits this run    : {self.credits_used}",
-            "-" * 46,
-            f"credits used this month: {self.spent_this_month} of {self.monthly_cap}",
         ])
 
 
@@ -92,6 +88,4 @@ def prepare(
         founder_comments=threads.from_submitter,
         founders_found=founders.founders_found,
         credits_used=founders.pdl_calls,
-        spent_this_month=founders.spent_this_month,
-        monthly_cap=founders.monthly_cap,
     )

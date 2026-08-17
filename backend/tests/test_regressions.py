@@ -191,8 +191,8 @@ class TestBestStoryMergeKeepsFields:
 
 class TestEnrichCreditGuards:
     """On-demand enrichment bypassed the "needs founders" query, so each POST
-    re-bought founders already paid for. max_calls_per_run was also a local, so
-    N requests allowed N x that against a shared monthly plan."""
+    re-bought founders already paid for. Stored data, not a counter, is what
+    keeps a repeated request free."""
 
     def _company(self, conn):
         from pipeline.models import Company
@@ -238,27 +238,6 @@ class TestEnrichCreditGuards:
 
         assert forced.pdl_calls == 1
         assert len(calls) == 2
-
-    def test_monthly_cap_survives_separate_runs(self, settings, conn, monkeypatch):
-        """The cap is stored, not a local, so a second run cannot get a fresh one."""
-        from dataclasses import replace
-
-        from pipeline.enrich import enrich
-        from pipeline.models import Company
-        from pipeline.repository import companies as repo
-
-        repo.upsert(conn, [
-            Company(source="yc", source_key=f"c{i}", name=f"Co {i}") for i in range(4)
-        ])
-        conn.commit()
-        self._stub(monkeypatch, [])
-        capped = replace(settings, pdl=replace(settings.pdl, monthly_credit_cap=2))
-
-        one = enrich(settings=capped, limit=2)
-        two = enrich(settings=capped, limit=2)
-
-        assert one.pdl_calls + two.pdl_calls == 2
-        assert two.stopped == "monthly_cap"
 
     def test_missing_token_raises_before_spending(self, settings, monkeypatch):
         from pipeline.enrich import enrich, pdl
@@ -500,7 +479,8 @@ class TestPrepare:
         from pipeline import comments as comments_module
         from pipeline.enrich import pdl, yc_page
         monkeypatch.setattr(
-            comments_module.comments_repo, "stories_for_companies", lambda c, ids: []
+            comments_module.comments_repo, "stories_for_companies",
+            lambda c, ids, stale_before=None: [],
         )
         monkeypatch.setattr(yc_page, "founder_slugs", lambda slug: [])
         monkeypatch.setattr(pdl, "enrich_person", lambda slug, s: None)

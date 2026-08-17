@@ -1,8 +1,8 @@
 """People Data Labs person enrichment, keyed on a LinkedIn slug.
 
-This is the only paid dependency in the project. The free plan allows 100
-lookups a month, so callers must budget: `enrich()` counts every call and stops
-at settings.pdl.max_calls_per_run.
+This is the only paid dependency in the project. The provider counts the
+allowance and answers 402 when it ends, which raises AccountExhausted and ends
+the run. We keep no second count: it could only disagree with the real one.
 """
 from __future__ import annotations
 
@@ -15,6 +15,14 @@ from ..config import PDLSettings
 from ..http import FetchError, get_json
 
 log = logging.getLogger(__name__)
+
+
+class AccountExhausted(RuntimeError):
+    """The plan's monthly matches are gone.
+
+    A 402 cannot succeed again until the month rolls over, so a run that sees
+    one stops rather than spending more requests discovering the same thing.
+    """
 
 
 class MissingToken(RuntimeError):
@@ -38,6 +46,8 @@ def enrich_person(linkedin_slug: str, settings: PDLSettings) -> dict[str, Any] |
             headers={"X-Api-Key": settings.token},
         )
     except FetchError as exc:
+        if exc.status == 402:
+            raise AccountExhausted(str(exc)) from exc
         log.warning("pdl %s -> %s", linkedin_slug, exc)
         return None
 
@@ -114,6 +124,8 @@ def search_founders(
             f"{SEARCH_URL}?{query}", headers={"X-Api-Key": settings.token}
         )
     except FetchError as exc:
+        if exc.status == 402:
+            raise AccountExhausted(str(exc)) from exc
         log.warning("pdl search %s -> %s", domain, exc)
         return []
 
