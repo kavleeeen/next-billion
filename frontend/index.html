@@ -158,7 +158,8 @@
 
 <header>
   <h1>next-billion</h1>
-  <p class="sub">Select up to 15 companies, then prepare and score them against the thesis.</p>
+  <p class="sub">Type a topic. <strong>Collect</strong> goes and fetches companies for it;
+     the list below is what we already hold. Select up to 15, then prepare and score them.</p>
   <div class="controls">
     <input type="search" id="q" placeholder="Search — try “agent”, “inference”, “infrastructure”" autofocus>
     <select id="source">
@@ -173,8 +174,10 @@
       <option value="points">sort: HN points</option>
       <option value="recent">sort: most recent launch</option>
     </select>
+    <button class="solid" id="collect" title="Go and collect companies for this topic">Collect</button>
     <span class="count" id="count"></span>
   </div>
+  <p class="sub" id="collectNote" hidden></p>
 </header>
 
 <div class="layout" id="layout">
@@ -569,6 +572,29 @@ const post = async (path, body) => (await fetch(path, {
   body: JSON.stringify(body),
 })).json();
 
+// The topic drives sourcing, so the search box is also the collect box. Sync
+// takes minutes, so the button reports rather than spins.
+async function collect() {
+  const topic = $('q').value.trim();
+  const note = $('collectNote'), button = $('collect');
+  if (!topic) { note.hidden = false; note.textContent = 'Type a topic first.'; $('q').focus(); return; }
+
+  button.disabled = true;
+  note.hidden = false;
+  note.textContent = `Collecting for “${topic}” — this takes a few minutes.`;
+  try {
+    const r = await post('/api/sync', {topic});
+    note.textContent = r.error
+      ? `Collect failed: ${r.error}`
+      : `Collected for “${topic}”: ${r.added ?? 0} new, ${r.updated ?? 0} updated.`;
+    if (!r.error) await load();
+  } catch (err) {
+    note.textContent = `Collect failed: ${err}`;
+  } finally {
+    button.disabled = false;
+  }
+}
+
 // clearSelection is for a run that finished. A failure keeps the selection,
 // because the obvious next act is to try those same companies again.
 function endRun(message, {clearSelection = false} = {}) {
@@ -627,6 +653,8 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape' && selected) 
 // ---- start ---------------------------------------------------------------
 let timer;
 $('q').addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(load, 140); });
+$('collect').addEventListener('click', collect);
+$('q').addEventListener('keydown', e => { if (e.key === 'Enter') collect(); });
 $('source').onchange = load;
 $('sort').onchange = load;
 

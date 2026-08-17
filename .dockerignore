@@ -1,0 +1,10 @@
+# The database is deliberately included, so it is not listed here.
+.git
+.venv
+backend/tests
+docs
+prompts
+*.md
+__pycache__
+**/__pycache__
+.pytest_cache

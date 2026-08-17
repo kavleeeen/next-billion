@@ -1,0 +1,13 @@
+# Without this file gcloud falls back to .gitignore, which excludes the
+# database — and the database is exactly what the image has to carry.
+.git
+.gitignore
+.venv
+.env
+backend/tests
+docs
+prompts
+*.md
+__pycache__
+**/__pycache__
+.pytest_cache

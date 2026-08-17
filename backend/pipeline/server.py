@@ -5,15 +5,21 @@ Standard library only, no framework and no build step:
     GET  /                          the single-page UI
     GET  /api/search?q=&source=&sort=&limit=
     GET  /api/companies/{id}        detail: traction, founders, stories, comments, score
+    POST /api/sync                  {topic: "..."} - collect companies for a topic
     POST /api/prepare               {ids: [...]} - threads + founders for a selection
     POST /api/score                 {ids: [...]} - five metrics and a verdict
 
-Bound to 127.0.0.1 on purpose — this is a local viewer, not a service.
+Bound to 127.0.0.1 by default — this is a viewer, not a service. When it is
+hosted, reading stays open and writing does not: POST spends PDL credits and
+Gemini quota, so it needs the WRITE_TOKEN secret. See
+docs/decisions/0015-hosting-the-viewer.md.
 """
 from __future__ import annotations
 
+import hmac
 import json
 import logging
+import os
 import re
 from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -29,6 +35,7 @@ from .repository import github_repos as repos_repo
 from .repository import hn_comments as comments_repo
 from .repository import hn_stories as stories_repo
 from .score import score
+from .sync import sync
 from .search import search
 
 log = logging.getLogger(__name__)
@@ -48,10 +55,31 @@ COMMENTS_PER_COMPANY = 30
 
 _COMPANY = re.compile(r"^/api/companies/(\d+)$")
 
+WRITE_TOKEN_ENV = "WRITE_TOKEN"
+LOOPBACK = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
+def _write_allowed(sent: str | None, host: str) -> bool:
+    """Who may spend money.
+
+    On loopback the only caller is the person running the process, so writing
+    is open. Bound to anything else the URL is reachable, and POST spends PDL
+    credits and Gemini quota, so it needs the token. Unset token means the
+    deployment is read-only, which is the safe default rather than an open one.
+    """
+    if host in LOOPBACK:
+        return True
+    expected = os.environ.get(WRITE_TOKEN_ENV)
+    if not expected:
+        return False
+    # Constant time, so a wrong token cannot be guessed byte by byte.
+    return hmac.compare_digest(sent or "", expected)
+
 
 class Handler(BaseHTTPRequestHandler):
-    def __init__(self, *args, settings: Settings, **kwargs):
+    def __init__(self, *args, settings: Settings, host: str = "127.0.0.1", **kwargs):
         self.settings = settings
+        self.bind_host = host
         super().__init__(*args, **kwargs)
 
     # ---- routing -----------------------------------------------------------
@@ -69,7 +97,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         route = urlparse(self.path).path
-        if route == "/api/prepare":
+        if not _write_allowed(self.headers.get("X-Write-Token"), self.bind_host):
+            self._json({"error": "read-only: collecting and scoring are disabled here"},
+                       status=403)
+            return
+        if route == "/api/sync":
+            self._sync()
+        elif route == "/api/prepare":
             self._run(prepare, "prepare")
         elif route == "/api/score":
             self._run(score, "score")
@@ -133,6 +167,29 @@ class Handler(BaseHTTPRequestHandler):
             "comments": [dict(row) for row in thread],
         })
 
+    def _sync(self) -> None:
+        """Collect companies for a topic. Minutes, not seconds, so the page
+        shows a waiting state rather than blocking on a spinner."""
+        length = int(self.headers.get("Content-Length") or 0)
+        try:
+            topic = (json.loads(self.rfile.read(length) or b"{}").get("topic") or "").strip()
+        except ValueError as exc:
+            self._json({"error": f"bad request: {exc}"}, status=400)
+            return
+
+        try:
+            report = sync(topic, settings=self.settings)
+        except ValueError as exc:
+            self._json({"error": str(exc)}, status=400)
+            return
+        except Exception as exc:  # noqa: BLE001 - surface the reason to the UI
+            log.warning("sync %r failed: %s", topic, exc)
+            self._json({"error": str(exc)}, status=500)
+            return
+
+        self._json({**report.__dict__, "topic": topic,
+                    "message": getattr(report, "message", "")})
+
     def _run(self, stage, name: str) -> None:
         """Run one stage over a selection and return its report.
 
@@ -193,8 +250,12 @@ def serve(
     port: int = DEFAULT_PORT,
     host: str = "127.0.0.1",
 ) -> None:
-    """Run until interrupted. Called by cli.cmd_serve."""
-    handler = partial(Handler, settings=settings)
+    """Run until interrupted. Called by cli.cmd_serve.
+
+    A host runtime states the port in $PORT, which wins over the default.
+    """
+    port = int(os.environ.get("PORT") or port)
+    handler = partial(Handler, settings=settings, host=host)
     with ThreadingHTTPServer((host, port), handler) as httpd:
         print(f"next-billion viewer → http://{host}:{port}   (ctrl-c to stop)")
         try:
@@ -208,4 +269,11 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
-    serve(port=parser.parse_args().port)
+    parser.add_argument("--host", default="127.0.0.1",
+                        help="0.0.0.0 to accept connections from outside")
+    parser.add_argument("-v", "--verbose", action="store_true",
+                        help="show what collecting and scoring are doing")
+    args = parser.parse_args()
+    logging.basicConfig(level=logging.INFO if args.verbose else logging.WARNING,
+                        format="%(levelname)s %(name)s: %(message)s")
+    serve(port=args.port, host=args.host)
