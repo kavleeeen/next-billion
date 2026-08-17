@@ -6,6 +6,7 @@ from typing import Iterable
 
 from ..db import utcnow
 from ..models import Company
+from . import sql
 
 UPSERT = """
 INSERT INTO companies (source, source_key, name, website, one_liner,
@@ -104,14 +105,14 @@ def search(
     }).fetchall()
 
 
+BY_IDS = "SELECT * FROM companies WHERE id IN (:ids)"
+
+
 def by_ids(conn: sqlite3.Connection, ids: list[int]) -> list[sqlite3.Row]:
     """Companies for an explicit id list. Used by on-demand enrichment."""
     if not ids:
         return []
-    marks = ",".join("?" * len(ids))
-    return conn.execute(
-        f"SELECT * FROM companies WHERE id IN ({marks})", ids
-    ).fetchall()
+    return sql.run(conn, BY_IDS, {"ids": ids}).fetchall()
 
 
 def count(conn: sqlite3.Connection) -> int:

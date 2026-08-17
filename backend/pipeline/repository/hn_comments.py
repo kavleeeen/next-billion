@@ -6,6 +6,7 @@ from typing import Iterable
 
 from ..db import utcnow
 from ..models import HNComment
+from . import sql
 
 UPSERT = """
 INSERT INTO hn_comments (story_id, comment_id, author, text, is_op, posted_at, created_at)
@@ -35,8 +36,8 @@ STORIES_FOR_COMPANIES = """
 SELECT s.story_id, s.author, s.title, s.points, s.company_id
 FROM hn_stories s
 WHERE s.comments > 0
-  AND (s.comments_fetched_at IS NULL OR s.comments_fetched_at < ?)
-  AND s.company_id IN ({placeholders})
+  AND (s.comments_fetched_at IS NULL OR s.comments_fetched_at < :stale_before)
+  AND s.company_id IN (:company_ids)
 ORDER BY s.points DESC
 """
 
@@ -83,10 +84,11 @@ def stories_for_companies(
     """
     if not company_ids:
         return []
-    marks = ",".join("?" * len(company_ids))
-    query = STORIES_FOR_COMPANIES.format(placeholders=marks)
     # "" is older than any ISO timestamp, so it selects only unfetched threads.
-    return conn.execute(query, [stale_before or "", *company_ids]).fetchall()
+    return sql.run(conn, STORIES_FOR_COMPANIES, {
+        "stale_before": stale_before or "",
+        "company_ids": company_ids,
+    }).fetchall()
 
 
 def for_company(conn: sqlite3.Connection, company_id: int, limit: int = 20) -> list[sqlite3.Row]:
