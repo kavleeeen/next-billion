@@ -37,7 +37,7 @@ waits. The wait buys no better analysis.
 **Mixing models inside a run.** A run with two models cannot be ranked, so a
 selection uses one. Measured on real evidence, `gemini-3.6-flash` and
 `gemini-3.5-flash-lite` differ by 2.9 points on average — small, but the
-ordering is the product.
+ordering is the product. The per-company table is in `ANALYSIS-PLAN.md` §7.
 
 **A larger cap with billing enabled.** The brief permits free tiers.
 
