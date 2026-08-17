@@ -27,13 +27,15 @@ ORDER BY s.points DESC
 LIMIT :limit
 """
 
-# Every unfetched thread belonging to a named set of companies. No points
-# ordering and no cap: a selected company needs all of its threads, not the
-# loudest one.
+# Every thread belonging to a named set of companies that is unfetched or
+# stale. No points ordering and no cap: a selected company needs all of its
+# threads, not the loudest one. A thread keeps getting replies after it is
+# first read, so a selection made a day later should see them.
 STORIES_FOR_COMPANIES = """
 SELECT s.story_id, s.author, s.title, s.points, s.company_id
 FROM hn_stories s
-WHERE s.comments_fetched_at IS NULL AND s.comments > 0
+WHERE s.comments > 0
+  AND (s.comments_fetched_at IS NULL OR s.comments_fetched_at < ?)
   AND s.company_id IN ({placeholders})
 ORDER BY s.points DESC
 """
@@ -70,14 +72,21 @@ def stories_needing_comments(conn: sqlite3.Connection, limit: int) -> list[sqlit
 
 
 def stories_for_companies(
-    conn: sqlite3.Connection, company_ids: list[int]
+    conn: sqlite3.Connection,
+    company_ids: list[int],
+    stale_before: str | None = None,
 ) -> list[sqlite3.Row]:
-    """Unfetched threads for these companies. Used before scoring a selection."""
+    """Threads for these companies that need a read. Used before scoring.
+
+    stale_before is an ISO timestamp: a thread read before it is fetched again.
+    Passing None keeps the original rule, which is to read each thread once.
+    """
     if not company_ids:
         return []
     marks = ",".join("?" * len(company_ids))
     query = STORIES_FOR_COMPANIES.format(placeholders=marks)
-    return conn.execute(query, company_ids).fetchall()
+    # "" is older than any ISO timestamp, so it selects only unfetched threads.
+    return conn.execute(query, [stale_before or "", *company_ids]).fetchall()
 
 
 def for_company(conn: sqlite3.Connection, company_id: int, limit: int = 20) -> list[sqlite3.Row]:

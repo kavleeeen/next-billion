@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterator
 
@@ -17,6 +17,14 @@ SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 def utcnow() -> str:
     """Timestamp for created_at / updated_at. Called by repository.companies."""
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def hours_ago(hours: float) -> str:
+    """Cutoff for a freshness test. Every timestamp column uses the format
+    utcnow() writes, so a string comparison is also a time comparison."""
+    return (
+        datetime.now(timezone.utc) - timedelta(hours=hours)
+    ).isoformat(timespec="seconds")
 
 
 @contextmanager

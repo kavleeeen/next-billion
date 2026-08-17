@@ -70,6 +70,11 @@ class Settings:
 
     fetch_workers: int = 8   # network-bound, so concurrency buys latency, not CPU
 
+    # How long collected evidence stays fresh. Re-selecting a company inside
+    # this window reuses what is stored instead of fetching it again. Applies
+    # to free work only: PDL founders are never re-bought on a timer.
+    refresh_after_hours: float = 1.0
+
     # One block per source. GitHub is in docs/decisions/0001-sources.md as an
     # accepted source but is not built yet, so it has no settings block here —
     # config describes what the code does, not what it will do.

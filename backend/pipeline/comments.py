@@ -14,7 +14,7 @@ import logging
 from dataclasses import dataclass
 
 from .config import Settings, settings as default_settings
-from .db import connect
+from .db import connect, hours_ago
 from .repository import hn_comments as comments_repo
 from .sources import hn_comments as source
 
@@ -48,15 +48,19 @@ def fetch_comments(
 ) -> CommentsReport:
     """Pull threads in parallel, then write them.
 
-    `company_ids` takes every unfetched thread those companies have, ignoring
-    `limit` — a selected company needs all of its threads, not the loudest one.
+    `company_ids` takes every thread those companies have, ignoring `limit` — a
+    selected company needs all of its threads, not the loudest one. A thread
+    read longer ago than settings.refresh_after_hours is read again, because
+    replies keep arriving after a launch.
     """
     settings.ensure_dirs()
     stored = op = 0
 
     with connect(settings.db_path) as conn:
         pending = (
-            comments_repo.stories_for_companies(conn, company_ids) if company_ids
+            comments_repo.stories_for_companies(
+                conn, company_ids, hours_ago(settings.refresh_after_hours)
+            ) if company_ids
             else comments_repo.stories_needing_comments(conn, limit)
         )
         if not pending:
