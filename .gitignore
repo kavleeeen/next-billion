@@ -14,11 +14,7 @@ venv/
 data/*.db
 data/*.db-journal
 
-# Local-only web viewer. Not part of the deliverable; used to eyeball the data
-# while building. The pipeline runs entirely from the CLI, and the viewer runs
-# on its own with `python -m pipeline.server`, so cli.py never imports it.
-frontend/index.html
-backend/pipeline/server.py
+# The viewer is committed. See docs/decisions/0014-the-viewer-ships.md
 
 # macOS
 .DS_Store

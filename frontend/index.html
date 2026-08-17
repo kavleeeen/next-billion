@@ -1,0 +1,665 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>next-billion</title>
+<style>
+  :root {
+    --bg:#fbfbfa; --panel:#fff; --line:#e6e4e0; --text:#1b1a18; --muted:#77736c;
+    --accent:#b0562a; --hover:#f5f3f0; --good:#3f6f4a; --warn:#8a6d1f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:#16151a; --panel:#1d1c22; --line:#2e2c35; --text:#eceaf2; --muted:#97929f;
+      --accent:#e08a5a; --hover:#24222b; --good:#7fbf8d; --warn:#d9b45c;
+    }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); padding-bottom:70px;
+         font:15px/1.55 ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif; }
+
+  header { position:sticky; top:0; z-index:5; background:var(--bg);
+           border-bottom:1px solid var(--line); padding:14px 22px 11px; }
+  h1 { margin:0; font-size:16px; letter-spacing:-.01em; }
+  .sub { margin:2px 0 11px; color:var(--muted); font-size:12.5px; }
+  .controls { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  input[type=search], select {
+    padding:8px 11px; background:var(--panel); color:var(--text);
+    border:1px solid var(--line); border-radius:7px; font:inherit; font-size:14px;
+  }
+  input[type=search] { flex:1 1 260px; min-width:190px; }
+  input[type=search]:focus, select:focus { outline:2px solid var(--accent); outline-offset:-1px; }
+  .count { color:var(--muted); font-size:12.5px; font-variant-numeric:tabular-nums; }
+
+  /* The table owns the full width. A memo does not fit in a third of a screen,
+     so the detail is a dialog instead of a column. */
+  .layout { display:grid; grid-template-columns:minmax(0,1fr); gap:16px; padding:16px 22px; }
+
+  .card { border:1px solid var(--line); border-radius:9px; background:var(--panel);
+          overflow:hidden; min-width:0; }
+
+  dialog { border:1px solid var(--line); border-radius:12px; background:var(--panel);
+           color:var(--text); padding:0; width:min(1060px, 94vw); max-height:88vh;
+           box-shadow:0 18px 50px rgba(0,0,0,.28); }
+  dialog::backdrop { background:rgba(0,0,0,.45); }
+  .sheet { max-height:88vh; overflow:auto; }
+  .sheethead { position:sticky; top:0; z-index:2; background:var(--panel);
+               border-bottom:1px solid var(--line); padding:13px 18px;
+               display:flex; align-items:flex-start; gap:12px; justify-content:space-between; }
+  /* Two readable columns once there is room, rather than one long dump. */
+  .sheetbody { padding:4px 18px 18px; display:grid; gap:0 28px;
+               grid-template-columns:minmax(0,1fr); }
+  @media (min-width:880px) {
+    .sheetbody { grid-template-columns:minmax(0,1.05fr) minmax(0,1fr); }
+  }
+  .sheetbody > section { min-width:0; }
+
+  /* Fixed layout with declared widths: every column fits, and long text is cut
+     with an ellipsis rather than widening the table. */
+  table { border-collapse:collapse; width:100%; table-layout:fixed; }
+  th,td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line);
+          overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  th { font-size:10.5px; text-transform:uppercase; letter-spacing:.07em; color:var(--muted);
+       font-weight:600; background:var(--panel); position:sticky; top:0; z-index:1; }
+  tbody tr { cursor:pointer; }
+  tbody tr:hover { background:var(--hover); }
+  tbody tr.on { background:var(--hover); box-shadow:inset 3px 0 0 var(--accent); }
+  tbody tr:last-child td { border-bottom:0; }
+  input[type=checkbox] { accent-color:var(--accent); width:15px; height:15px; cursor:pointer; }
+  .name { font-weight:600; }
+  .num { text-align:right; font-variant-numeric:tabular-nums; }
+  .desc { color:var(--muted); }
+  th.sortable { cursor:pointer; user-select:none; }
+  th.sortable:hover { color:var(--text); }
+  /* The arrow keeps its width when idle, so the header does not jump. */
+  .arrow { display:inline-block; width:11px; text-align:center; }
+  th.sortable[aria-sort="none"] .arrow { opacity:.28; }
+
+  col.c-pick  { width:34px; }
+  col.c-name  { width:19%; }
+  col.c-score { width:66px; }
+  col.c-when  { width:84px; }
+  col.c-batch { width:60px; }
+  col.c-desc  { width:auto; }
+  col.c-eviid { width:76px; }
+  /* Narrow screens drop the least load-bearing columns instead of scrolling. */
+  @media (max-width:880px) { .col-when, .col-eviid { display:none; } }
+  @media (max-width:620px) { .col-batch { display:none; } }
+
+  .tag { display:inline-block; padding:1px 7px; border-radius:20px; border:1px solid var(--line);
+         font-size:11px; color:var(--muted); font-variant-numeric:tabular-nums; }
+  .tag.yc { color:var(--accent); border-color:var(--accent); }
+  .tag.ok { color:var(--good); border-color:var(--good); }
+  .tag.no { color:var(--warn); border-color:var(--warn); }
+  .tags { display:flex; gap:4px; flex-wrap:wrap; }
+
+  /* Verdict colour, not score colour: the band is the call a partner acts on. */
+  .score { display:inline-block; min-width:44px; padding:1px 7px; border-radius:20px;
+           border:1px solid var(--line); font-size:12.5px; font-weight:600;
+           text-align:center; font-variant-numeric:tabular-nums; }
+  .score.meet  { color:var(--good); border-color:var(--good); }
+  .score.watch { color:var(--warn); border-color:var(--warn); }
+  .score.pass  { color:var(--muted); }
+  .stale { font-style:italic; opacity:.7; }
+
+  .pad { padding:15px 17px; }
+  .panelhead { display:flex; align-items:flex-start; gap:10px; justify-content:space-between; }
+  .close { border:0; background:transparent; color:var(--muted); font-size:20px;
+           line-height:1; padding:0 4px; cursor:pointer; }
+  .pad h2 { margin:0 0 3px; font-size:16px; }
+  .pad h3 { margin:19px 0 8px; font-size:11px; text-transform:uppercase;
+            letter-spacing:.07em; color:var(--muted); }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:9px; }
+  .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(78px,1fr)); gap:7px; }
+  .stat { border:1px solid var(--line); border-radius:7px; padding:7px 9px; }
+  .stat b { display:block; font-size:16px; font-variant-numeric:tabular-nums; }
+  .stat span { font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
+  .person, .quote { border:1px solid var(--line); border-radius:7px; padding:9px 11px; margin-bottom:7px; }
+  .roles { margin:5px 0 0; padding-left:16px; color:var(--muted); font-size:13px; }
+  .quote p { margin:0 0 5px; font-size:13.5px; }
+  .story { display:flex; gap:8px; justify-content:space-between; padding:6px 0;
+           border-bottom:1px solid var(--line); font-size:13.5px; }
+  .story:last-child { border-bottom:0; }
+  .metric { display:flex; gap:10px; align-items:baseline; justify-content:space-between;
+            padding:6px 0; border-bottom:1px solid var(--line); font-size:13.5px; }
+  .metric:last-of-type { border-bottom:0; }
+  .metric .w { color:var(--muted); font-size:11.5px; }
+  .metric b { font-variant-numeric:tabular-nums; }
+  .lim, .flag { color:var(--warn); font-size:12px; margin:3px 0 0; }
+  .struck { color:var(--muted); text-decoration:line-through; }
+  /* The panel is the only place long prose is allowed to wrap. */
+  #detail, #detail * { white-space:normal; }
+
+  a { color:var(--accent); text-decoration:none; }
+  a:hover { text-decoration:underline; }
+  button {
+    padding:7px 13px; border-radius:7px; border:1px solid var(--accent);
+    background:transparent; color:var(--accent); font:inherit; font-size:13.5px; cursor:pointer;
+  }
+  button.solid { background:var(--accent); color:var(--bg); }
+  button:hover:not(:disabled) { opacity:.85; }
+  button:disabled { opacity:.4; cursor:default; }
+  button.plain { border-color:var(--line); color:var(--muted); }
+  .hint { color:var(--muted); font-size:12px; }
+  .empty { padding:38px 17px; text-align:center; color:var(--muted); }
+
+  .bar { position:fixed; left:0; right:0; bottom:0; z-index:6; background:var(--panel);
+         border-top:1px solid var(--line); padding:10px 22px;
+         display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+  .bar[hidden] { display:none; }
+  .bar .grow { flex:1; }
+  .pill { display:inline-block; padding:1px 8px; border-radius:20px; font-size:11.5px;
+          border:1px solid var(--line); color:var(--muted); }
+  .pill.busy { color:var(--accent); border-color:var(--accent); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>next-billion</h1>
+  <p class="sub">Select up to 15 companies, then prepare and score them against the thesis.</p>
+  <div class="controls">
+    <input type="search" id="q" placeholder="Search — try “agent”, “inference”, “infrastructure”" autofocus>
+    <select id="source">
+      <option value="">all sources</option>
+      <option value="yc">YC only</option>
+      <option value="hn">Hacker News only</option>
+    </select>
+    <select id="sort">
+      <option value="default">sort: batch</option>
+      <option value="score">sort: score, highest first</option>
+      <option value="score_asc">sort: score, lowest first</option>
+      <option value="points">sort: HN points</option>
+      <option value="recent">sort: most recent launch</option>
+    </select>
+    <span class="count" id="count"></span>
+  </div>
+</header>
+
+<div class="layout" id="layout">
+  <div class="card">
+    <table>
+      <colgroup>
+        <col class="c-pick"><col class="c-name"><col class="c-score">
+        <col class="c-when col-when"><col class="c-batch col-batch">
+        <col class="c-desc"><col class="c-eviid col-eviid">
+      </colgroup>
+      <thead><tr>
+        <th><input type="checkbox" id="pickAll" title="Select everything shown, up to 15"></th>
+        <th>Company</th>
+        <th class="num sortable" id="sortScore">Score<span class="arrow" id="scoreArrow"></span></th>
+        <th class="col-when">Scored</th><th class="col-batch">Batch</th>
+        <th>Description</th><th class="num col-eviid">Evidence</th>
+      </tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div class="empty" id="empty" hidden></div>
+  </div>
+</div>
+
+<dialog id="detail"></dialog>
+
+<div class="bar" id="bar" hidden>
+  <strong id="picked"></strong>
+  <span class="pill" id="progress"></span>
+  <span class="grow"></span>
+  <span class="hint" id="result"></span>
+  <button class="plain" id="clear">Clear</button>
+  <button class="solid" id="prep">Prepare + score</button>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => (s ?? '').toString().replace(/[&<>"]/g, c =>
+  ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const host = u => { try { return new URL(u).host.replace(/^www\./,''); } catch { return u; } };
+const num = n => (n ?? 0).toLocaleString();
+const parseTags = j => { try { return JSON.parse(j || '[]'); } catch { return []; } };
+
+const MAX = 15;
+// Must match settings.refresh_after_hours. Only used to label a score as old;
+// the server decides what is actually re-fetched.
+const REFRESH_HOURS = 1;
+// A run left in this state longer than this was abandoned, not running.
+const RUN_EXPIRY_MS = 15 * 60 * 1000;
+const BAND = {'Take a meeting':'meet', 'Watch':'watch', 'Pass':'pass'};
+
+// ---- state that survives a refresh --------------------------------------
+// The browser holds the selection and the view. It never holds a score: the
+// server is the only source of truth for those, so a reload always agrees
+// with the database rather than with a stale copy.
+const KEY = 'nb.v1';
+const store = {
+  read() { try { return JSON.parse(localStorage.getItem(KEY) || '{}'); } catch { return {}; } },
+  write(patch) { localStorage.setItem(KEY, JSON.stringify({...store.read(), ...patch})); },
+};
+
+let pickedIds = new Set((store.read().picked || []).slice(0, MAX));
+let rows = new Map();       // id -> the row as the server last reported it
+let shown = [];             // the current search result, in display order
+let selected = null;          // the open dialog; deliberately not persisted
+let run = store.read().run ?? null;   // {ids, at} while a run is in flight
+// The outcome outlives the selection: clearing the checkboxes must not take
+// the result line with them before it has been read.
+let notice = '';
+let noticeTimer = null;
+const NOTICE_MS = 15000;
+
+const savePicked = () => store.write({picked: [...pickedIds]});
+
+// ---- cells ---------------------------------------------------------------
+function scoreCell(c) {
+  if (c.total == null) return '<span class="hint">—</span>';
+  return `<span class="score ${BAND[c.verdict] || ''}" title="${esc(c.verdict)}${
+    c.scored_by ? ' · ' + esc(c.scored_by) : ''}">${c.total.toFixed(1)}</span>`;
+}
+
+function ago(iso) {
+  if (!iso) return '<span class="hint">—</span>';
+  const mins = Math.max(0, Math.round((Date.now() - new Date(iso)) / 60000));
+  const text = mins < 1 ? 'just now'
+    : mins < 60 ? `${mins}m ago`
+    : mins < 1440 ? `${Math.round(mins / 60)}h ago`
+    : `${Math.round(mins / 1440)}d ago`;
+  const stale = mins >= REFRESH_HOURS * 60;
+  return `<span class="hint ${stale ? 'stale' : ''}" title="${esc(iso)}${
+    stale ? ' — older than the refresh window, so it would be scored again' : ''}">${text}</span>`;
+}
+
+const isScored = c => c && c.total != null;
+const isPrepared = c => c && (c.founder_count > 0 || c.comment_count > 0);
+
+
+// ---- the bar -------------------------------------------------------------
+function drawBar() {
+  $('bar').hidden = pickedIds.size === 0 && !run && !notice;
+
+  // Counted from what the server just returned, so the bar is correct after a
+  // refresh without remembering anything about the previous run.
+  const chosen = [...pickedIds].map(id => rows.get(id)).filter(Boolean);
+  const prepared = chosen.filter(isPrepared).length;
+  const scored = chosen.filter(isScored).length;
+  const busy = Boolean(run);
+  // Nothing selected and nothing running: the bar is only holding an outcome.
+  const reporting = !busy && pickedIds.size === 0;
+
+  $('picked').textContent = reporting ? 'Run finished' : `${pickedIds.size} / ${MAX} selected`;
+  $('progress').hidden = reporting;
+  $('progress').className = 'pill' + (busy ? ' busy' : '');
+  $('progress').textContent = busy
+    ? `running — ${scored} of ${run.ids.length} scored`
+    : `${prepared} prepared · ${scored} scored`;
+
+  $('prep').hidden = reporting;
+  $('prep').disabled = busy || pickedIds.size === 0;
+  $('prep').textContent = busy ? 'Working…' : 'Prepare + score';
+  $('clear').disabled = busy;
+  $('clear').textContent = reporting ? 'Dismiss' : 'Clear';
+}
+
+function dismissNotice() {
+  notice = '';
+  clearTimeout(noticeTimer);
+  $('result').textContent = '';
+  drawBar();
+}
+
+// ---- list ----------------------------------------------------------------
+async function load() {
+  const params = new URLSearchParams({
+    q: $('q').value.trim(), source: $('source').value, sort: $('sort').value, limit: 200,
+  });
+  const data = await (await fetch('/api/search?' + params)).json();
+
+  $('count').textContent = data.total + (data.total === 1 ? ' company' : ' companies');
+  $('empty').hidden = data.total > 0;
+  if (!data.total) $('empty').textContent =
+    data.term ? `Nothing matches “${data.term}”.` : 'Database is empty — run `pipeline sync`.';
+
+  for (const c of data.companies) rows.set(c.id, c);
+  shown = data.companies;
+
+  $('rows').innerHTML = data.companies.map(c => {
+    const full = pickedIds.size >= MAX && !pickedIds.has(c.id);
+    const evidence = (c.founder_count || c.comment_count)
+      ? `${c.founder_count || 0}f · ${c.comment_count || 0}c` : '—';
+    return `
+    <tr data-id="${c.id}" class="${c.id === selected ? 'on' : ''}">
+      <td><input type="checkbox" data-id="${c.id}"
+        ${pickedIds.has(c.id) ? 'checked' : ''} ${full ? 'disabled' : ''}></td>
+      <td class="name" title="${esc(c.name)}">${esc(c.name)}</td>
+      <td class="num">${scoreCell(c)}</td>
+      <td class="col-when">${ago(c.scored_at)}</td>
+      <td class="col-batch"><span class="tag ${c.source === 'yc' ? 'yc' : ''}">${esc(c.batch || c.source)}</span></td>
+      <td class="desc" title="${esc(c.one_liner || '')}">${esc(c.one_liner || '')}</td>
+      <td class="num col-eviid"><span class="hint">${evidence}</span></td>
+    </tr>`;
+  }).join('');
+
+  $('rows').querySelectorAll('tr').forEach(tr => {
+    tr.onclick = e => {
+      if (e.target.type === 'checkbox') return;
+      const id = Number(tr.dataset.id);
+      id === selected ? closeDetail() : showCompany(id);
+    };
+  });
+  $('rows').querySelectorAll('input[type=checkbox]').forEach(box => {
+    box.onchange = () => {
+      const id = Number(box.dataset.id);
+      box.checked ? pickedIds.add(id) : pickedIds.delete(id);
+      savePicked();
+      drawBar();
+      if (pickedIds.size >= MAX || !box.checked) load();   // refresh disabled state
+    };
+  });
+  syncPickAll();
+  syncSortArrow();
+  drawBar();
+}
+
+// Highest first is the useful default for a score, so the first click gives
+// that rather than the alphabetical convention of ascending.
+const SCORE_CYCLE = {default: 'score', score: 'score_asc', score_asc: 'default'};
+const ARROW = {score: '▼', score_asc: '▲'};
+
+function syncSortArrow() {
+  const sort = $('sort').value;
+  const th = $('sortScore');
+  $('scoreArrow').textContent = ARROW[sort] || '▼';
+  th.setAttribute('aria-sort',
+    sort === 'score' ? 'descending' : sort === 'score_asc' ? 'ascending' : 'none');
+  th.title = `Sort by score, ${{
+    default: 'highest first', score: 'lowest first', score_asc: 'back to batch order',
+  }[sort] || 'highest first'}`;
+}
+
+$('sortScore').onclick = () => {
+  $('sort').value = SCORE_CYCLE[$('sort').value] || 'score';
+  store.write({sort: $('sort').value});
+  load();
+};
+
+// The header box acts on the current search result, not on the database. It
+// is the shortlist a partner just built, and the cap still applies.
+function syncPickAll() {
+  const box = $('pickAll');
+  const chosen = shown.filter(c => pickedIds.has(c.id)).length;
+  box.disabled = shown.length === 0;
+  box.checked = chosen > 0 && chosen === shown.length;
+  box.indeterminate = chosen > 0 && chosen < shown.length;
+  box.title = shown.length > MAX
+    ? `Select the first ${MAX} of ${shown.length} shown`
+    : `Select all ${shown.length} shown`;
+}
+
+$('pickAll').onchange = () => {
+  const everyShownPicked = shown.length > 0 && shown.every(c => pickedIds.has(c.id));
+  if (everyShownPicked) {
+    shown.forEach(c => pickedIds.delete(c.id));
+    $('result').textContent = '';
+  } else {
+    let added = 0;
+    for (const c of shown) {
+      if (pickedIds.size >= MAX) break;
+      if (!pickedIds.has(c.id)) { pickedIds.add(c.id); added++; }
+    }
+    // Say so rather than silently dropping the rest of the result.
+    $('result').textContent = shown.length > pickedIds.size
+      ? `Added ${added}. The cap is ${MAX}, so ${shown.length - pickedIds.size} shown are not selected.`
+      : `Added ${added}.`;
+  }
+  savePicked();
+  load();
+};
+
+// ---- detail panel --------------------------------------------------------
+function closeDetail() {
+  selected = null;
+  const dlg = $('detail');
+  if (dlg.open) dlg.close();
+  $('rows').querySelectorAll('tr').forEach(tr => tr.classList.remove('on'));
+}
+
+// Escape and the close button both fire the dialog's own close event, so the
+// saved state is cleared in one place rather than at each exit.
+$('detail').addEventListener('close', () => {
+  selected = null;
+  $('rows').querySelectorAll('tr').forEach(tr => tr.classList.remove('on'));
+});
+// A click on the backdrop lands on the dialog itself, never on its contents.
+$('detail').addEventListener('click', e => { if (e.target === $('detail')) $('detail').close(); });
+
+async function showCompany(id) {
+  selected = id;
+  const dlg = $('detail');
+  if (!dlg.open) dlg.showModal();
+  $('rows').querySelectorAll('tr').forEach(tr =>
+    tr.classList.toggle('on', Number(tr.dataset.id) === id));
+  dlg.innerHTML = '<div class="empty">Loading…</div>';
+
+  const d = await (await fetch('/api/companies/' + id)).json();
+  if (d.error) { dlg.innerHTML = `<div class="empty">${esc(d.error)}</div>`; return; }
+  if (selected !== id) return;    // the user moved on while this was loading
+
+  const c = d.company, t = d.traction, a = d.analysis, g = d.github;
+  // 289 companies store a repository URL as their website. GitHub's homepage
+  // field is the real address, so prefer it when we have one.
+  const site = (g && g.homepage) || c.website;
+  const list = xs => `<ul class="roles">${xs.map(x => `<li>${esc(x)}</li>`).join('')}</ul>`;
+
+  const industries = parseTags(c.industries)
+    .map(x => `<span class="tag">${esc(x)}</span>`).join(' ');
+
+  const stats = t ? [
+    ['Launches', t.story_count ?? 0], ['HN points', num(t.points ?? 0)],
+    ['Comments', num(t.comments ?? 0)], ['Team', c.team_size ?? '—'],
+  ] : [['Team', c.team_size ?? '—']];
+
+  const score = a ? `
+    <div class="row">
+      <span class="score ${BAND[a.verdict] || ''}">${a.total.toFixed(1)}</span>
+      <b>${esc(a.verdict)}</b>
+      <span class="hint">${esc(a.model || '')} · ${esc(a.prompt_version || '')}</span>
+      ${ago(a.created_at)}
+    </div>
+    <p style="margin:0 0 6px;font-size:13.5px">${esc(a.scores.summary || '')}</p>
+    ${a.scores.metrics.map(m => `
+      <div class="metric">
+        <span>${esc(m.label)} <span class="w">${m.weight}%${m.tier ? ' · ' + esc(m.tier) : ''}</span></span>
+        <span>${m.raw !== m.score ? `<b class="struck">${m.raw}</b> ` : ''}<b>${m.score}</b>
+          <span class="w">= ${m.contribution}</span></span>
+      </div>
+      ${m.limits.map(l => `<div class="lim">${esc(l)}</div>`).join('')}
+      ${m.claims.slice(0, 2).map(cl =>
+        `<div class="hint">“${esc(cl.text)}”
+         <a href="${esc(cl.source_url)}" target="_blank" rel="noopener">${esc(cl.evidence_id)}</a></div>`
+      ).join('')}`).join('')}
+    ${a.scores.flags.map(f => `<p class="flag">${esc(f)}</p>`).join('')}
+    ${a.scores.would_change_the_call.length
+      ? `<h3>What would move this</h3>${list(a.scores.would_change_the_call)}` : ''}
+    ${a.scores.not_found.length
+      ? `<h3>What we could not find</h3>${list(a.scores.not_found)}` : ''}`
+    : '<div class="hint">Not scored yet — select this company and press Prepare + score.</div>';
+
+  const repo = !g || g.missing
+    ? `<div class="hint">No public repository. Closed source is a business choice,
+       not a traction signal ${g ? '' : '- and this company has not been checked yet'}.</div>`
+    : `<div class="row" style="margin-bottom:6px">
+         <a href="https://github.com/${esc(g.full_name || g.owner)}" target="_blank" rel="noopener">${esc(g.full_name || g.owner)}</a>
+         <span class="tag">found via ${esc(g.found_via)}</span>
+         ${g.is_fork ? '<span class="tag no">a fork</span>' : ''}
+         ${g.archived ? '<span class="tag no">archived</span>' : ''}
+       </div>
+       <div class="stats">
+         <div class="stat"><b>${num(g.stars)}</b><span>stars</span></div>
+         <div class="stat"><b>${num(g.contributors)}</b><span>contributors</span></div>
+         <div class="stat"><b>${num(g.forks)}</b><span>forks</span></div>
+         <div class="stat"><b>${num(g.org_followers)}</b><span>followers</span></div>
+       </div>
+       <div class="hint" style="margin-top:7px">last push ${esc((g.pushed_at||'?').slice(0,10))}
+         · created ${esc((g.gh_created_at||'?').slice(0,10))}${g.language ? ' · ' + esc(g.language) : ''}</div>`;
+
+  const founders = d.founders.length ? d.founders.map(f => `
+    <div class="person">
+      <b>${esc(f.name)}</b>
+      <span class="tag ${f.pdl_matched ? 'ok' : 'no'}">${f.discovered_via === 'yc_page' ? 'YC-stated' : 'inferred'}</span>
+      ${f.current_title ? `<div class="hint">${esc(f.current_title)}</div>` : ''}
+      ${f.prior_roles.length ? `<ul class="roles">${f.prior_roles.slice(0,4).map(r =>
+        `<li>${esc(r.title || '?')} — ${esc(r.company || '?')}</li>`).join('')}</ul>`
+        : '<div class="hint">No prior roles — metric 1 falls back to tier 2, capped at 79.</div>'}
+      <div class="hint" style="margin-top:5px">source: <a href="${esc(f.source_url)}" target="_blank" rel="noopener">${esc(host(f.source_url))}</a></div>
+    </div>`).join('')
+    : '<div class="hint">Not prepared yet — select this company and press Prepare + score.</div>';
+
+  const op = d.comments.filter(x => x.is_op);
+  const voice = op.length ? op.slice(0, 3).map(x => `
+    <div class="quote">
+      <p>${esc(x.text.slice(0, 420))}${x.text.length > 420 ? '…' : ''}</p>
+      <a class="hint" href="https://news.ycombinator.com/item?id=${esc(x.comment_id)}" target="_blank" rel="noopener">
+        ${esc(x.author || 'founder')} · see thread</a>
+    </div>`).join('') + (op.length > 3 ? `<div class="hint">${op.length - 3} more from the founder.</div>` : '')
+    : '<div class="hint">No founder comments. Metric 4 reads these.</div>';
+
+  const stories = d.stories.length ? d.stories.map(s => `
+    <div class="story">
+      <a href="https://news.ycombinator.com/item?id=${esc(s.story_id)}" target="_blank" rel="noopener">${esc(s.title)}</a>
+      <span class="hint">${num(s.points)} pts · ${esc(s.posted_at || '')}</span>
+    </div>`).join('') : '<div class="hint">No Hacker News launches.</div>';
+
+  // The verdict and its evidence sit on the left, the raw material on the
+  // right, so neither has to be read through the other.
+  dlg.innerHTML = `
+    <div class="sheet">
+      <div class="sheethead">
+        <div>
+          <h2 style="margin:0 0 4px;font-size:17px">${esc(c.name)}</h2>
+          <div class="row" style="margin:0">
+            <span class="tag ${c.source === 'yc' ? 'yc' : ''}">${esc(c.batch || c.source)}</span>
+            ${site ? `<a href="${esc(site)}" target="_blank" rel="noopener">${esc(host(site))}</a>` : '<span class="tag">no website</span>'}
+            ${g && !g.missing ? `<a href="https://github.com/${esc(g.full_name || g.owner)}" target="_blank" rel="noopener">${esc(g.full_name || g.owner)}</a>` : ''}
+            ${industries}
+          </div>
+        </div>
+        <button class="close" id="closeDetail" title="Close (Esc)">×</button>
+      </div>
+
+      <div class="sheetbody">
+        <section>
+          <h3>Score</h3>${score}
+        </section>
+        <section>
+          <p style="color:var(--muted);margin:16px 0 0;font-size:13.5px">${esc(c.description || c.one_liner || '')}</p>
+          <h3>Traction</h3>
+          <div class="stats">${stats.map(([k,v]) => `<div class="stat"><b>${v}</b><span>${k}</span></div>`).join('')}</div>
+          ${t?.first_posted_at ? `<div class="hint" style="margin-top:7px">launches from ${esc(t.first_posted_at)} to ${esc(t.last_posted_at)}</div>` : ''}
+          <h3>Repository</h3>${repo}
+          <h3>Founders</h3>${founders}
+          <h3>In the founder's own words</h3>${voice}
+          <h3>Hacker News</h3>${stories}
+        </section>
+      </div>
+    </div>`;
+  $('closeDetail').onclick = closeDetail;
+}
+
+// ---- the run -------------------------------------------------------------
+const post = async (path, body) => (await fetch(path, {
+  method: 'POST', headers: {'Content-Type': 'application/json'},
+  body: JSON.stringify(body),
+})).json();
+
+// clearSelection is for a run that finished. A failure keeps the selection,
+// because the obvious next act is to try those same companies again.
+function endRun(message, {clearSelection = false} = {}) {
+  run = null;
+  store.write({run: null});
+  if (message) $('result').textContent = message;
+
+  if (clearSelection) {
+    pickedIds.clear();
+    savePicked();
+    closeDetail();
+    notice = message || '';
+    clearTimeout(noticeTimer);
+    noticeTimer = setTimeout(dismissNotice, NOTICE_MS);
+  }
+  drawBar();
+}
+
+// Both stages are safe to repeat: prepare skips fresh threads and existing
+// founders, and score reuses a score inside the refresh window. So a run
+// interrupted by a refresh is finished by running it again, not by trying to
+// rejoin a request the browser already dropped.
+async function runFlow(ids, {resumed = false} = {}) {
+  run = {ids, at: Date.now()};
+  store.write({run});
+  drawBar();
+  $('result').textContent = resumed
+    ? 'Resuming an interrupted run…'
+    : `${ids.length} companies — gathering evidence`;
+
+  const p = await post('/api/prepare', {ids});
+  if (p.error) { endRun(`Prepare failed: ${p.error}`); await load(); return; }
+
+  $('result').textContent =
+    `${p.threads_pulled} threads, ${p.comments_stored} comments ` +
+    `(${p.founder_comments} from founders), ${p.founders_found} founders, ` +
+    `${p.credits_used} credits — scoring now`;
+  await load();
+
+  const s = await post('/api/score', {ids});
+  if (s.error) { endRun(`Scoring failed: ${s.error}`); await load(); return; }
+
+  endRun(s.message, {clearSelection: true});
+
+  await load();
+  if (selected) await showCompany(selected);
+}
+
+$('prep').onclick = () => runFlow([...pickedIds]);
+$('clear').onclick = () => {
+  if (pickedIds.size === 0) { dismissNotice(); return; }
+  pickedIds.clear(); savePicked(); closeDetail(); load();
+};
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && selected) closeDetail(); });
+
+// ---- start ---------------------------------------------------------------
+let timer;
+$('q').addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(load, 140); });
+$('source').onchange = load;
+$('sort').onchange = load;
+
+(async function start() {
+  const saved = store.read();
+  $('q').value = saved.q || '';
+  $('source').value = saved.source || '';
+  $('sort').value = saved.sort || 'default';
+  for (const el of ['q', 'source', 'sort']) {
+    $(el).addEventListener('change', () => store.write({[el]: $(el).value}));
+  }
+  $('q').addEventListener('input', () => store.write({q: $('q').value}));
+
+  await load();
+
+  // A run recorded before the reload gets reported, never restarted. Firing
+  // work on load meant a reload during a run started a second one, and five
+  // reloads started five. Report the state and let the user decide.
+  if (run) {
+    const finished = run.ids.every(id => {
+      const c = rows.get(id);
+      return c && c.scored_at && new Date(c.scored_at).getTime() >= run.at;
+    });
+    const stale = Date.now() - run.at >= RUN_EXPIRY_MS;
+    const done = run.ids.length;
+    endRun(finished
+      ? `The previous run finished: ${done} companies scored.`
+      : stale
+        ? 'The previous run was abandoned. Press Prepare + score to finish it.'
+        : 'A run was interrupted. Press Prepare + score to finish it — '
+          + 'anything already done is reused, so it costs almost nothing.');
+  }
+})();
+</script>
+</body>
+</html>
