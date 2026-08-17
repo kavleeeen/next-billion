@@ -69,3 +69,31 @@ class TestYCSearches:
         assert urls, "no request was made"
         assert "q=AI+agents+for+SMBs" in urls[0]
         assert "batch=W25" in urls[0]
+
+
+class TestTheLaunchPostIsKept:
+    """Algolia returns the founder's own post in the same response as the title.
+
+    We parsed six fields from that response and ignored this one, so 695
+    companies held 61 characters of text. See 0016.
+    """
+
+    def _company(self, **hit):
+        return hackernews._to_company({"objectID": "1", "title": "Show HN: Acme", **hit})
+
+    def test_the_post_becomes_the_description(self):
+        c = self._company(story_text="Hey HN! Acme does bookkeeping for salons.")
+        assert c.description == "Hey HN! Acme does bookkeeping for salons."
+
+    def test_html_is_stripped_and_entities_decoded(self):
+        c = self._company(story_text='We&#x27;re <a href="https://acme.dev">Acme</a> &amp; co.')
+        assert c.description == "We're Acme & co."
+
+    def test_a_post_with_no_body_leaves_it_unset(self):
+        # A link submission has no story_text. NULL, not "".
+        assert self._company().description is None
+        assert self._company(story_text="   ").description is None
+
+    def test_the_title_still_becomes_the_one_liner(self):
+        c = self._company(story_text="A long post")
+        assert c.one_liner == "Show HN: Acme"

@@ -1,7 +1,21 @@
 """Small pure functions. No I/O, so they are cheap to test."""
 from __future__ import annotations
 
+import html
 import re
+
+_TAG = re.compile(r"<[^>]+>")
+_WHITESPACE = re.compile(r"\s+")
+
+
+def plain_text(markup: str | None) -> str:
+    """HN serves bodies as HTML. Strip to text.
+
+    Tags go before entities are decoded, so an escaped `&lt;b&gt;` stays as the
+    literal text the author typed instead of becoming a tag and vanishing.
+    """
+    return _WHITESPACE.sub(" ", html.unescape(_TAG.sub(" ", markup or ""))).strip()
+
 from urllib.parse import urlparse
 
 # Suffixes needing three labels rather than two.

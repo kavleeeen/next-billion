@@ -12,7 +12,6 @@ ones metric 1's fallback tier and metric 4 read.
 """
 from __future__ import annotations
 
-import html
 import logging
 import re
 import urllib.parse
@@ -20,6 +19,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from ..http import get_json
 from ..models import HNComment
+from ..normalize import plain_text
 
 log = logging.getLogger(__name__)
 
@@ -28,14 +28,6 @@ PER_STORY = 100          # Algolia's page size; one page is plenty per thread
 MIN_LENGTH = 40          # "Congrats!" is not evidence
 MAX_LENGTH = 4000        # keep prompts bounded
 
-_TAG = re.compile(r"<[^>]+>")
-_WHITESPACE = re.compile(r"\s+")
-
-
-def _plain(markup: str | None) -> str:
-    """HN serves comment bodies as HTML. Strip to text for the prompt."""
-    text = _TAG.sub(" ", markup or "")
-    return _WHITESPACE.sub(" ", html.unescape(text)).strip()
 
 
 def fetch(story_id: str, submitter: str | None = None) -> list[HNComment]:
@@ -52,7 +44,7 @@ def fetch(story_id: str, submitter: str | None = None) -> list[HNComment]:
 
     comments: list[HNComment] = []
     for hit in payload.get("hits") or []:
-        text = _plain(hit.get("comment_text"))
+        text = plain_text(hit.get("comment_text"))
         if len(text) < MIN_LENGTH:
             continue
         author = hit.get("author")

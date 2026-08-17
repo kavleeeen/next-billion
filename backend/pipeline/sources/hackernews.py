@@ -22,7 +22,7 @@ from ..http import get_json
 from ..pacing import Pacer
 from .coverage import Coverage
 from ..models import Company, HNStory
-from ..normalize import parse_hn_title
+from ..normalize import parse_hn_title, plain_text
 
 log = logging.getLogger(__name__)
 
@@ -75,6 +75,10 @@ def _to_company(hit: dict[str, Any]) -> Company:
         name=name,
         website=hit.get("url"),      # None for text posts, which are still real companies
         one_liner=hit.get("title"),
+        # The founder's own launch post. A title is 61 characters; this is the
+        # only real description an HN company has, and it arrives in the same
+        # response. See docs/decisions/0016-the-launch-post-is-the-description.md.
+        description=plain_text(hit.get("story_text")) or None,
         batch=batch,
         raw=hit,
     )
