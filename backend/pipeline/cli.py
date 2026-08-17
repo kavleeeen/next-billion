@@ -8,7 +8,9 @@ import sys
 from .comments import fetch_comments
 from .enrich import enrich
 from .enrich.pdl import MissingToken
-from .prepare import TooManySelected, prepare
+from .prepare import MAX_SELECTION, TooManySelected, prepare
+from .score import score
+from .scoring.gemini import MissingToken as GeminiMissingToken
 from .search import DEFAULT_LIMIT, search
 from .sync import sync
 
@@ -67,6 +69,17 @@ def cmd_prepare(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_score(args: argparse.Namespace) -> int:
+    ids = [int(x) for x in args.ids.split(",") if x.strip()]
+    try:
+        report = score(ids, force=args.force)
+    except (TooManySelected, GeminiMissingToken, ValueError) as exc:
+        print(exc)
+        return 1
+    print(report.render())
+    return 0
+
+
 
 def build_parser() -> argparse.ArgumentParser:
     # Shared flags, accepted either before or after the subcommand.
@@ -88,10 +101,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_search.add_argument("--limit", type=int)
     p_search.add_argument("--source", choices=("yc", "hn"),
                           help="only this connector")
-    p_search.add_argument("--sort", choices=("default", "points", "recent"),
+    p_search.add_argument("--sort",
+                          choices=("default", "points", "recent", "score", "score_asc"),
                           default="default",
                           help="default: batch; points: most HN traction; "
-                               "recent: latest launch")
+                               "recent: latest launch; score: highest total; "
+                               "score_asc: lowest total")
     p_search.set_defaults(func=cmd_search)
 
     p_enrich = sub.add_parser("enrich", parents=[common],
@@ -113,10 +128,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_prepare = sub.add_parser("prepare", parents=[common],
                                help="get selected companies ready to score")
-    p_prepare.add_argument("ids", help="company ids, comma separated (max 20)")
+    p_prepare.add_argument("ids", help=f"company ids, comma separated (max {MAX_SELECTION})")
     p_prepare.add_argument("--no-pdl", action="store_true",
                            help="threads only, spend no credits")
     p_prepare.set_defaults(func=cmd_prepare)
+
+    p_score = sub.add_parser("score", parents=[common],
+                             help="score prepared companies against the thesis")
+    p_score.add_argument("ids", help=f"company ids, comma separated (max {MAX_SELECTION})")
+    p_score.add_argument("--force", action="store_true",
+                         help="score again even if a fresh score exists")
+    p_score.set_defaults(func=cmd_score)
 
     return parser
 

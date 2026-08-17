@@ -5,7 +5,7 @@ are written on one thread, because a SQLite connection is not safe to share.
 
 Sync does not pull threads. It could only cover 40 per run — 5% of companies —
 and it chose them by points rather than by what anyone asked for. Threads are
-pulled for a selection instead, where 20 companies cost about five seconds and
+pulled for a selection instead, where a selection costs about four seconds and
 coverage is complete.
 """
 from __future__ import annotations

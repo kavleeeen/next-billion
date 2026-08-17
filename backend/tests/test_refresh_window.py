@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from pipeline.db import hours_ago, utcnow
+from pipeline.db import ADDED_COLUMNS, connect, hours_ago, utcnow
 from pipeline.models import Company, HNStory
 from pipeline.repository import companies as companies_repo
 from pipeline.repository import hn_comments as comments_repo
@@ -76,3 +76,40 @@ class TestStaleThreads:
             HNStory(story_id="3", title="Launch HN: quiet", comments=0)
         ])
         assert _pending(conn, company_id) == set()
+
+
+class TestSchemaKeepsUp:
+    """An existing database has to reach the current schema on connect.
+
+    Both failures here are silent: nothing errors, the old definition just
+    stays and answers slightly wrong questions for ever.
+    """
+
+    def test_an_edited_view_is_rebuilt(self, settings, conn):
+        # IF NOT EXISTS would keep this stub instead of the real definition.
+        conn.execute("DROP VIEW IF EXISTS latest_analysis")
+        conn.execute("CREATE VIEW latest_analysis AS SELECT 1 AS company_id")
+        conn.commit()
+
+        with connect(settings.db_path) as fresh:
+            columns = [r[1] for r in fresh.execute("PRAGMA table_info(latest_analysis)")]
+        assert "verdict" in columns
+
+    def test_a_missing_column_is_added(self, settings, conn):
+        conn.execute("DROP TABLE analyses")
+        conn.execute("""CREATE TABLE analyses (
+            id INTEGER PRIMARY KEY, company_id INTEGER NOT NULL,
+            verdict TEXT NOT NULL, total REAL NOT NULL,
+            scores_json TEXT NOT NULL, model TEXT, created_at TEXT NOT NULL)""")
+        conn.commit()
+
+        with connect(settings.db_path) as fresh:
+            columns = [r[1] for r in fresh.execute("PRAGMA table_info(analyses)")]
+        assert "prompt_version" in columns
+
+    def test_every_added_column_names_a_real_table(self, conn):
+        # A typo here is invisible: the column is simply never added.
+        for table, column, _ in ADDED_COLUMNS:
+            present = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+            assert present, f"{table} does not exist"
+            assert column in present, f"{table}.{column} is not in schema.sql"

@@ -18,17 +18,30 @@ CREATE TABLE IF NOT EXISTS companies (
     UNIQUE (source, source_key)
 );
 
+-- One row per scoring run. Rows are never replaced, so a re-score keeps the
+-- previous number and a reader can see that a score moved, and when.
 CREATE TABLE IF NOT EXISTS analyses (
     id          INTEGER PRIMARY KEY,
     company_id  INTEGER NOT NULL REFERENCES companies (id) ON DELETE CASCADE,
     verdict     TEXT    NOT NULL,          -- Pass | Watch | Take a meeting
     total       REAL    NOT NULL,
-    scores_json TEXT    NOT NULL,          -- 5 metrics: raw, capped, evidence URLs
+    scores_json TEXT    NOT NULL,          -- 5 metrics: raw, capped, claims, flags
     model       TEXT,
+    prompt_version TEXT,                   -- with model, the cache key for a re-score
     created_at  TEXT    NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_analyses_company ON analyses (company_id);
+-- The list shows the newest score for each company, on every search.
+CREATE INDEX IF NOT EXISTS idx_analyses_latest ON analyses (company_id, id DESC);
+
+-- The newest scoring run for each company. MAX(id) and not MAX(created_at):
+-- two runs inside the same second would otherwise tie.
+DROP VIEW IF EXISTS latest_analysis;
+CREATE VIEW latest_analysis AS
+SELECT company_id, total, verdict, created_at, model
+FROM analyses a
+WHERE a.id = (SELECT MAX(id) FROM analyses WHERE company_id = a.company_id);
 
 CREATE TABLE IF NOT EXISTS founders (
     id              INTEGER PRIMARY KEY,
@@ -70,9 +83,12 @@ CREATE TABLE IF NOT EXISTS hn_stories (
 
 CREATE INDEX IF NOT EXISTS idx_hn_stories_company ON hn_stories (company_id);
 
+-- Views are dropped and rebuilt on every connect. IF NOT EXISTS would keep an
+-- old definition forever once one is edited, and nothing would report it.
 -- Metric 2 reads this instead of columns on `companies`, so the aggregate can
 -- never drift from the stories behind it.
-CREATE VIEW IF NOT EXISTS company_traction AS
+DROP VIEW IF EXISTS company_traction;
+CREATE VIEW company_traction AS
 SELECT company_id,
        COUNT(*)          AS story_count,
        SUM(points)       AS points,

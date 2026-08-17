@@ -80,6 +80,39 @@ class GitHubSettings:
 
 
 @dataclass(frozen=True)
+class GeminiSettings:
+    """Google AI Studio, free tier. Pro has no free tier at all, and every full
+    Flash model allows only 20 requests a day, which one run would spend.
+    Flash Lite allows 500 a day and 15 a minute. See
+    docs/decisions/0005-selection-cap-of-fifteen.md."""
+
+    token_env: str = "GEMINI_API_KEY"
+    base_url: str = "https://generativelanguage.googleapis.com/v1beta/models"
+    # One model for a whole run, so the companies stay comparable. The same
+    # evidence scores differently on different models, thus a mixed run cannot
+    # be ranked. Each model has its own budget, per project.
+    model: str = "gemini-3.5-flash-lite"
+
+    temperature: float = 0.0
+    # A scoring call thinks before it answers, so it outlives the 20s used for
+    # plain data fetches.
+    timeout: float = 120.0
+    # The model accepts 15 requests a minute. Pace below that rather than
+    # discover the ceiling: a refusal costs a request and returns nothing.
+    requests_per_minute: int = 12
+    # The pacer sets the rate; the workers only overlap the waiting.
+    workers: int = 2
+    # Enough to outlast a per-minute window. A daily refusal is not retried at
+    # all, so a bigger number cannot drain the day's allowance.
+    retries: int = 4
+
+    @property
+    def token(self) -> str | None:
+        """Read at call time so .env loaded later still works."""
+        return os.environ.get(self.token_env)
+
+
+@dataclass(frozen=True)
 class Settings:
     db_path: Path = ROOT / "data" / "next-billion.db"
 
@@ -88,9 +121,9 @@ class Settings:
 
     fetch_workers: int = 8   # network-bound, so concurrency buys latency, not CPU
 
-    # How long collected evidence stays fresh. Re-selecting a company inside
-    # this window reuses what is stored instead of fetching it again. Applies
-    # to free work only: PDL founders are never re-bought on a timer.
+    # How long collected evidence and a score stay fresh. Re-selecting a
+    # company inside this window reuses what is stored instead of fetching.
+    # Applies to free work only: PDL founders are never re-bought on a timer.
     refresh_after_hours: float = 1.0
 
     # One block per source.
@@ -98,6 +131,7 @@ class Settings:
     hn: HNSettings = field(default_factory=HNSettings)
     pdl: PDLSettings = field(default_factory=PDLSettings)
     github: GitHubSettings = field(default_factory=GitHubSettings)
+    gemini: GeminiSettings = field(default_factory=GeminiSettings)
 
     def ensure_dirs(self) -> None:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)

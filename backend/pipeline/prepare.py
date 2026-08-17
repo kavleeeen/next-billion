@@ -1,6 +1,6 @@
 """Stage 3: get a selected shortlist ready to score.
 
-A partner picks up to 20 companies. Before any of them can be scored, three
+A partner picks up to 15 companies. Before any of them can be scored, three
 kinds of evidence have to exist:
 
     launch threads   free      the founder's own words, for metrics 1 and 4
@@ -27,7 +27,9 @@ from .repository import companies as companies_repo
 
 log = logging.getLogger(__name__)
 
-MAX_SELECTION = 20
+# One selection must fit inside one minute of the model's request allowance.
+# See docs/decisions/0005-selection-cap-of-fifteen.md.
+MAX_SELECTION = 15
 
 
 class TooManySelected(ValueError):

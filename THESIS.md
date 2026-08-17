@@ -169,12 +169,12 @@ founders we never looked at. Rule 4 holds it at Watch until someone does.
 ## What gets scored
 
 Nothing is scored automatically. A partner searches the collected companies,
-reads the list, and selects **up to 20**. Only those are analysed.
+reads the list, and selects **up to 15**. Only those are analysed.
 
 ```
 search        →  candidates from the database, instant, no AI
-select        →  a person picks up to 20
-enrich        →  founders and launch threads for those 20 only
+select        →  a person picks up to 15
+enrich        →  founders and launch threads for those 15 only
 score         →  all five metrics, then the overrides
 memo          →  one per company
 ```

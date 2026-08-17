@@ -28,16 +28,27 @@ ON CONFLICT (source, source_key) DO UPDATE SET
 
 EXISTS = "SELECT 1 FROM companies WHERE source = ? AND source_key = ?"
 
-# Traction is joined in so the list can sort by it without a second query.
+# Traction and the newest score are joined in, so the list can show and sort by
+# both without a second query for each row.
 SEARCH = r"""
 SELECT c.*,
        COALESCE(t.story_count, 0)  AS story_count,
        COALESCE(t.points, 0)       AS points,
        COALESCE(t.comments, 0)     AS comments,
        t.last_posted_at,
-       (SELECT COUNT(*) FROM founders f WHERE f.company_id = c.id) AS founder_count
+       an.total      AS total,
+       an.verdict    AS verdict,
+       an.created_at AS scored_at,
+       an.model      AS scored_by,
+       (SELECT COUNT(*) FROM founders f WHERE f.company_id = c.id) AS founder_count,
+       -- Evidence already gathered, so a partner can see which of their
+       -- selection still needs preparing.
+       (SELECT COUNT(*) FROM hn_comments hc
+          JOIN hn_stories hs ON hs.story_id = hc.story_id
+         WHERE hs.company_id = c.id) AS comment_count
 FROM companies c
 LEFT JOIN company_traction t ON t.company_id = c.id
+LEFT JOIN latest_analysis an ON an.company_id = c.id
 WHERE (c.name        LIKE :pattern ESCAPE '\'
     OR c.one_liner   LIKE :pattern ESCAPE '\'
     OR c.description LIKE :pattern ESCAPE '\')
@@ -45,6 +56,10 @@ WHERE (c.name        LIKE :pattern ESCAPE '\'
 ORDER BY
   CASE :sort
     WHEN 'points' THEN -COALESCE(t.points, 0)
+    -- Unscored companies sort to the end in both directions: 1 beats every
+    -- real -total, and 999 beats every real total.
+    WHEN 'score'     THEN -COALESCE(an.total, -1)
+    WHEN 'score_asc' THEN COALESCE(an.total, 999)
     WHEN 'recent' THEN 0
     ELSE 0
   END,
@@ -93,9 +108,11 @@ def search(
     source: str | None = None,
     sort: str = "default",
 ) -> list[sqlite3.Row]:
-    """Keyword search with traction joined in. Called by search.search().
+    """Keyword search with traction and the newest score joined in.
 
-    sort: 'points' (most traction), 'recent' (latest launch), or 'default'.
+    sort: 'points' (most traction), 'recent' (latest launch), 'score' (highest
+    total first), 'score_asc' (lowest first), or 'default' (newest batch, then
+    name). Unscored companies sort last under both score orders.
     """
     return conn.execute(SEARCH, {
         "pattern": f"%{_escape_like(term.strip())}%",
