@@ -68,6 +68,26 @@ class SyncReport:
     merged: int = 0
 
     @property
+    def added(self) -> int:
+        return sum(r.added for r in self.sources)
+
+    @property
+    def updated(self) -> int:
+        return sum(r.updated for r in self.sources)
+
+    @property
+    def message(self) -> str:
+        """One line a person can act on.
+
+        The stage owns this sentence, not the page. A caller that assembled it
+        from the parts would be a second copy, free to disagree — and the parts
+        it needs are per source, so it got "0 new" every time.
+        """
+        counted = (f"{self.added} new, {self.updated} updated"
+                   if self.added or self.updated else "nothing new")
+        return ". ".join([counted, *self.truncated]) + "."
+
+    @property
     def truncated(self) -> list[str]:
         """Sources that had more to give than we read."""
         return [line for r in self.sources

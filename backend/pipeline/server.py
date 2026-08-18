@@ -187,8 +187,23 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"error": str(exc)}, status=500)
             return
 
-        self._json({**report.__dict__, "topic": topic,
-                    "message": getattr(report, "message", "")})
+        # dataclasses inside the report would serialise as repr strings, so
+        # each source is turned into a plain dict.
+        self._json({
+            "topic": topic,
+            "message": report.message,
+            "added": report.added,
+            "updated": report.updated,
+            "total_rows": report.total_rows,
+            "total_stories": report.total_stories,
+            "merged": report.merged,
+            "sources": [
+                {"source": r.source, "fetched": r.fetched, "usable": r.usable,
+                 "rejected": r.rejected, "added": r.added, "updated": r.updated,
+                 "read": r.coverage.read, "available": r.coverage.available}
+                for r in report.sources
+            ],
+        })
 
     def _run(self, stage, name: str) -> None:
         """Run one stage over a selection and return its report.

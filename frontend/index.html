@@ -586,7 +586,7 @@ async function collect() {
     const r = await post('/api/sync', {topic});
     note.textContent = r.error
       ? `Collect failed: ${r.error}`
-      : `Collected for “${topic}”: ${r.added ?? 0} new, ${r.updated ?? 0} updated.`;
+      : `Collected for “${topic}”: ${r.message}`;
     if (!r.error) await load();
   } catch (err) {
     note.textContent = `Collect failed: ${err}`;

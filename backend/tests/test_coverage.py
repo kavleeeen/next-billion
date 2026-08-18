@@ -90,3 +90,38 @@ class TestPacing:
         monkeypatch.setattr(yc, "get_json", lambda url: {"companies": [], "totalPages": 1})
         yc._page("W25", 1, "agents")
         assert waited == [yc.REQUESTS_PER_MINUTE]
+
+
+class TestSyncMessage:
+    """The page printed "0 new, 0 updated" while 166 companies were added.
+
+    SyncReport counts per source, so a caller assembling the sentence from
+    `report.added` read a field that does not exist. The stage owns the
+    sentence, as 0013 decided for scoring.
+    """
+
+    def _report(self, *pairs, coverage=None):
+        sources = [
+            SourceReport(name, 0, 0, added, updated,
+                         coverage or Coverage.whole(0))
+            for name, added, updated in pairs
+        ]
+        return SyncReport(sources=sources, total_rows=0)
+
+    def test_it_sums_across_sources(self):
+        report = self._report(("yc", 76, 19), ("hn", 90, 87))
+        assert report.added == 166
+        assert report.updated == 106
+        assert report.message == "166 new, 106 updated."
+
+    def test_nothing_new_says_so_rather_than_zero(self):
+        assert self._report(("yc", 0, 0)).message == "nothing new."
+
+    def test_an_update_only_run_is_not_nothing(self):
+        assert self._report(("yc", 0, 12)).message == "0 new, 12 updated."
+
+    def test_a_truncated_source_reaches_the_sentence(self):
+        report = self._report(("hn", 90, 0),
+                              coverage=Coverage(read=1000, available=14860))
+        assert "90 new" in report.message
+        assert "too broad" in report.message
