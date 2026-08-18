@@ -64,8 +64,13 @@ class Bundle:
         return any(item.kind == kind for item in self.items)
 
 
-def _profile(company: sqlite3.Row) -> Item:
-    """The company describing itself. Feeds metrics 3 and 4."""
+def _profile(company: sqlite3.Row, story_id: str | None) -> Item:
+    """The company describing itself. Feeds metrics 3 and 4.
+
+    `story_id` is the company's newest launch thread. A Hacker News company's
+    source_key is its normalised name, not an item id, so linking that produced
+    `item?id=statewright` and Hacker News answered "No such item".
+    """
     lines = [f"{company['name']} — {company['one_liner'] or 'no one-liner'}"]
 
     facts = []
@@ -84,10 +89,13 @@ def _profile(company: sqlite3.Row) -> Item:
     if company["description"]:
         lines.append(company["description"].strip())
 
-    url = (
-        yc_page.page_url(company["source_key"]) if company["source"] == "yc"
-        else HN_ITEM.format(id=company["source_key"])
-    )
+    if company["source"] == "yc":
+        url = yc_page.page_url(company["source_key"])
+    elif story_id:
+        url = HN_ITEM.format(id=story_id)
+    else:
+        # No thread to point at. Its own site is the only honest source left.
+        url = company["website"] or ""
     return Item(id="profile", kind="profile", source_url=url, text="\n".join(lines))
 
 
@@ -221,9 +229,10 @@ def build(conn: sqlite3.Connection, company_id: int) -> Bundle:
     if not company:
         raise ValueError(f"no company with id {company_id}")
 
-    items: list[Item] = [_profile(company)]
-
+    # Newest first, so stories[0] is the thread the profile should point at.
     stories = stories_repo.for_company(conn, company_id)
+    items: list[Item] = [_profile(company, stories[0]["story_id"] if stories else None)]
+
     traction = stories_repo.traction(conn, company_id)
     if traction and traction["story_count"]:
         items.append(_traction(traction, stories[0]["story_id"] if stories else None))

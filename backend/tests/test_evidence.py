@@ -219,3 +219,64 @@ class TestEvidenceItem:
     ])
     def test_warnings_are_stated(self, flag, phrase):
         assert phrase in self._text(**{flag: 1})
+
+
+class TestEveryCitationResolves:
+    """A citation that 404s defeats the whole point of the id space (0011).
+
+    An HN company's source_key is its normalised name, so the profile item
+    linked `item?id=statewright` and Hacker News answered "No such item". Every
+    one of the 1,606 HN companies was affected, and profile is the most-cited
+    item in the bundle.
+    """
+
+    def _company(self, **over):
+        base = dict(id=1, source="hn", source_key="statewright", name="Statewright",
+                    one_liner="State machines for agents", description=None,
+                    batch=None, team_size=None, industries="[]",
+                    website="https://statewright.ai")
+        return {**base, **over}
+
+    def test_an_hn_profile_points_at_the_thread(self):
+        from pipeline.evidence import _profile
+        item = _profile(self._company(), "48108778")
+        assert item.source_url == "https://news.ycombinator.com/item?id=48108778"
+
+    def test_it_never_uses_the_source_key(self):
+        from pipeline.evidence import _profile
+        assert "statewright" not in _profile(self._company(), "48108778").source_url
+
+    def test_an_hn_company_with_no_thread_falls_back_to_its_site(self):
+        from pipeline.evidence import _profile
+        assert _profile(self._company(), None).source_url == "https://statewright.ai"
+
+    def test_no_thread_and_no_site_gives_no_link(self):
+        from pipeline.evidence import _profile
+        assert _profile(self._company(website=None), None).source_url == ""
+
+    def test_a_yc_profile_still_uses_its_slug(self):
+        from pipeline.evidence import _profile
+        url = _profile(self._company(source="yc", source_key="airweave"), None).source_url
+        assert "ycombinator.com/companies/airweave" in url
+
+    def test_every_hn_item_id_in_a_real_bundle_is_numeric(self, tmp_path):
+        # The class of bug: an HN permalink id is always digits.
+        import re
+        from pipeline.db import connect
+        from pipeline.models import Company, HNStory
+        from pipeline.repository import companies as companies_repo
+        from pipeline.repository import hn_stories as stories_repo
+        from pipeline.evidence import build
+
+        with connect(tmp_path / "t.db") as conn:
+            companies_repo.upsert(conn, [Company(source="hn", source_key="acme-co",
+                                                 name="Acme", website="https://acme.dev")])
+            cid = companies_repo.id_for(conn, "hn", "acme-co")
+            stories_repo.upsert(conn, cid, [HNStory(story_id="44100001",
+                                                    title="Show HN: Acme", points=99,
+                                                    comments=5, posted_at="2026-01-01")])
+            conn.commit()
+            for item in build(conn, cid).items:
+                if "news.ycombinator.com/item?id=" in item.source_url:
+                    got = item.source_url.rsplit("=", 1)[1]
+                    assert re.fullmatch(r"\d+", got), f"{item.id} -> {got}"
